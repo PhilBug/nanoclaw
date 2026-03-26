@@ -11,7 +11,12 @@ vi.mock('../env.js', () => ({ readEnvFile: vi.fn(() => ({})) }));
 // Mock config
 vi.mock('../config.js', () => ({
   ASSISTANT_NAME: 'Andy',
+  DEFAULT_TRIGGER: '@Andy',
   TRIGGER_PATTERN: /^@Andy\b/i,
+  getTriggerPattern: (trigger = '@Andy') => {
+    const escaped = trigger.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`^${escaped}\\b`, 'i');
+  },
 }));
 
 // Mock logger
@@ -102,6 +107,7 @@ function createTextCtx(overrides: {
   messageId?: number;
   date?: number;
   entities?: any[];
+  meUsername?: string;
   replyToMessage?: {
     messageId?: number;
     fromId?: number;
@@ -141,7 +147,7 @@ function createTextCtx(overrides: {
           }
         : undefined,
     },
-    me: { username: 'andy_ai_bot', id: 12345 },
+    me: { username: overrides.meUsername ?? 'andy_ai_bot', id: 12345 },
     reply: vi.fn(),
   };
 }
@@ -559,15 +565,16 @@ describe('TelegramChannel', () => {
       await channel.connect();
 
       const ctx = createTextCtx({
-        text: '@andy_ai_bot what time is it?',
-        entities: [{ type: 'mention', offset: 0, length: 12 }],
+        text: '@nanoclaw_2137_bot what time is it?',
+        entities: [{ type: 'mention', offset: 0, length: 18 }],
+        meUsername: 'nanoclaw_2137_bot',
       });
       await triggerTextMessage(ctx);
 
       expect(opts.onMessage).toHaveBeenCalledWith(
         'tg:100200300',
         expect.objectContaining({
-          content: '@Andy @andy_ai_bot what time is it?',
+          content: '@Andy @nanoclaw_2137_bot what time is it?',
         }),
       );
     });
@@ -592,6 +599,35 @@ describe('TelegramChannel', () => {
       );
     });
 
+    it('uses the registered group trigger for bot mentions', async () => {
+      const opts = createTestOpts({
+        registeredGroups: vi.fn(() => ({
+          'tg:100200300': {
+            name: 'Ops Group',
+            folder: 'ops-group',
+            trigger: '@Ops',
+            added_at: '2024-01-01T00:00:00.000Z',
+          },
+        })),
+      });
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const ctx = createTextCtx({
+        text: '@nanoclaw_2137_bot deploy status',
+        entities: [{ type: 'mention', offset: 0, length: 18 }],
+        meUsername: 'nanoclaw_2137_bot',
+      });
+      await triggerTextMessage(ctx);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({
+          content: '@Ops @nanoclaw_2137_bot deploy status',
+        }),
+      );
+    });
+
     it('does not translate mentions of other bots', async () => {
       const opts = createTestOpts();
       const channel = new TelegramChannel('test-token', opts);
@@ -607,6 +643,26 @@ describe('TelegramChannel', () => {
         'tg:100200300',
         expect.objectContaining({
           content: '@some_other_bot hi', // No translation
+        }),
+      );
+    });
+
+    it('does not translate when mention target does not match ctx.me.username', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const ctx = createTextCtx({
+        text: '@nanoclaw_2137_bot hi',
+        entities: [{ type: 'mention', offset: 0, length: 18 }],
+        meUsername: 'other_bot',
+      });
+      await triggerTextMessage(ctx);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({
+          content: '@nanoclaw_2137_bot hi',
         }),
       );
     });

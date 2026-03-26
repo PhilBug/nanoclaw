@@ -7,7 +7,6 @@ import fs from 'fs';
 import path from 'path';
 
 import {
-  ANTHROPIC_BASE_URL,
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,

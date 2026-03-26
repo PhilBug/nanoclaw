@@ -232,8 +232,8 @@ describe('formatOutbound', () => {
 // --- Trigger gating with requiresTrigger flag ---
 
 describe('trigger gating (requiresTrigger interaction)', () => {
-  // Replicates the exact logic from processGroupMessages and startMessageLoop:
-  //   if (!isMainGroup && group.requiresTrigger !== false) { check group.trigger }
+  // Replicates the trigger gating semantics from processGroupMessages and
+  // startMessageLoop, without the sender allowlist plumbing.
   function shouldRequireTrigger(
     isMainGroup: boolean,
     requiresTrigger: boolean | undefined,
@@ -249,7 +249,11 @@ describe('trigger gating (requiresTrigger interaction)', () => {
   ): boolean {
     if (!shouldRequireTrigger(isMainGroup, requiresTrigger)) return true;
     const triggerPattern = getTriggerPattern(trigger);
-    return messages.some((m) => triggerPattern.test(m.content.trim()));
+    return messages.some(
+      (m) =>
+        triggerPattern.test(m.content.trim()) ||
+        Boolean(m.is_reply_to_assistant),
+    );
   }
 
   it('main group always processes (no trigger needed)', () => {
@@ -275,6 +279,42 @@ describe('trigger gating (requiresTrigger interaction)', () => {
   it('non-main group with requiresTrigger=true processes when trigger present', () => {
     const msgs = [makeMsg({ content: `@${ASSISTANT_NAME} do something` })];
     expect(shouldProcess(false, true, undefined, msgs)).toBe(true);
+  });
+
+  it('non-main group processes when replying to the assistant', () => {
+    const msgs = [
+      makeMsg({
+        content: 'following up',
+        is_reply: true,
+        is_reply_to_assistant: true,
+        reply_to_username: 'andy_ai_bot',
+      }),
+    ];
+    expect(shouldProcess(false, true, undefined, msgs)).toBe(true);
+  });
+
+  it('non-main group does not process when replying to another bot', () => {
+    const msgs = [
+      makeMsg({
+        content: 'following up',
+        is_reply: true,
+        is_reply_to_assistant: false,
+        reply_to_username: 'traszka_bot',
+      }),
+    ];
+    expect(shouldProcess(false, true, undefined, msgs)).toBe(false);
+  });
+
+  it('non-main group does not process when replying to a normal user', () => {
+    const msgs = [
+      makeMsg({
+        content: 'following up',
+        is_reply: true,
+        is_reply_to_assistant: false,
+        reply_to_username: 'alice',
+      }),
+    ];
+    expect(shouldProcess(false, true, undefined, msgs)).toBe(false);
   });
 
   it('non-main group uses its per-group trigger instead of the default trigger', () => {

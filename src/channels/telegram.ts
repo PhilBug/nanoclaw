@@ -7,6 +7,7 @@ import { logger } from '../logger.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
   Channel,
+  NewMessage,
   OnChatMetadata,
   OnInboundMessage,
   RegisteredGroup,
@@ -39,6 +40,46 @@ async function sendTelegramMessage(
     logger.debug({ err }, 'Markdown send failed, falling back to plain text');
     await api.sendMessage(chatId, text, options);
   }
+}
+
+function getReplyMetadata(
+  ctx: any,
+): Pick<
+  NewMessage,
+  | 'is_reply'
+  | 'is_reply_to_assistant'
+  | 'reply_to_username'
+  | 'reply_to_message_id'
+> {
+  const replyToMessage = ctx.message.reply_to_message;
+  if (!replyToMessage) {
+    return {
+      is_reply: false,
+      is_reply_to_assistant: false,
+      reply_to_username: null,
+      reply_to_message_id: null,
+    };
+  }
+
+  const originalSender = replyToMessage.from;
+  const isReplyToAssistant =
+    !!originalSender && originalSender.id === ctx.me?.id;
+
+  let replyToUsername: string | null = null;
+  if (originalSender) {
+    replyToUsername = isReplyToAssistant
+      ? ctx.me?.username || null
+      : originalSender.username ||
+        originalSender.first_name ||
+        `user_${originalSender.id}`;
+  }
+
+  return {
+    is_reply: true,
+    is_reply_to_assistant: isReplyToAssistant,
+    reply_to_username: replyToUsername,
+    reply_to_message_id: replyToMessage.message_id.toString(),
+  };
 }
 
 export class TelegramChannel implements Channel {
@@ -148,39 +189,16 @@ export class TelegramChannel implements Channel {
         return;
       }
 
-      // Extract reply metadata if this message is a reply
-      let is_reply = false;
-      let reply_to_username: string | null = null;
-      let reply_to_message_id: string | null = null;
-
-      if (ctx.message.reply_to_message) {
-        is_reply = true;
-        reply_to_message_id =
-          ctx.message.reply_to_message.message_id.toString();
-
-        const botUserId = ctx.me?.id;
-        const originalSender = ctx.message.reply_to_message.from;
-
-        if (originalSender) {
-          if (botUserId && originalSender.id === botUserId) {
-            // User replied to the bot's own message
-            reply_to_username = ctx.me?.username || null;
-          } else {
-            // User replied to another user's message
-            reply_to_username =
-              originalSender.username ||
-              originalSender.first_name ||
-              `user_${originalSender.id}`;
-          }
-        }
-
+      const replyMetadata = getReplyMetadata(ctx);
+      if (replyMetadata.is_reply) {
         logger.debug(
           {
             chatJid,
             sender: senderName,
-            is_reply,
-            reply_to_username,
-            reply_to_message_id,
+            is_reply: replyMetadata.is_reply,
+            is_reply_to_assistant: replyMetadata.is_reply_to_assistant,
+            reply_to_username: replyMetadata.reply_to_username,
+            reply_to_message_id: replyMetadata.reply_to_message_id,
           },
           'Telegram reply metadata detected',
         );
@@ -195,9 +213,7 @@ export class TelegramChannel implements Channel {
         content,
         timestamp,
         is_from_me: false,
-        is_reply,
-        reply_to_username,
-        reply_to_message_id,
+        ...replyMetadata,
       });
 
       logger.info(
@@ -220,32 +236,7 @@ export class TelegramChannel implements Channel {
         'Unknown';
       const caption = ctx.message.caption ? ` ${ctx.message.caption}` : '';
 
-      // Extract reply metadata if this message is a reply
-      let is_reply = false;
-      let reply_to_username: string | null = null;
-      let reply_to_message_id: string | null = null;
-
-      if (ctx.message.reply_to_message) {
-        is_reply = true;
-        reply_to_message_id =
-          ctx.message.reply_to_message.message_id.toString();
-
-        const botUserId = ctx.me?.id;
-        const originalSender = ctx.message.reply_to_message.from;
-
-        if (originalSender) {
-          if (botUserId && originalSender.id === botUserId) {
-            // User replied to the bot's own message
-            reply_to_username = ctx.me?.username || null;
-          } else {
-            // User replied to another user's message
-            reply_to_username =
-              originalSender.username ||
-              originalSender.first_name ||
-              `user_${originalSender.id}`;
-          }
-        }
-      }
+      const replyMetadata = getReplyMetadata(ctx);
 
       const isGroup =
         ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
@@ -264,9 +255,7 @@ export class TelegramChannel implements Channel {
         content: `${placeholder}${caption}`,
         timestamp,
         is_from_me: false,
-        is_reply,
-        reply_to_username,
-        reply_to_message_id,
+        ...replyMetadata,
       });
     };
 

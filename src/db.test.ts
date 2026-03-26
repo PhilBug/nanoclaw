@@ -28,6 +28,11 @@ function store(overrides: {
   content: string;
   timestamp: string;
   is_from_me?: boolean;
+  is_bot_message?: boolean;
+  is_reply?: boolean;
+  is_reply_to_assistant?: boolean;
+  reply_to_username?: string | null;
+  reply_to_message_id?: string | null;
 }) {
   storeMessage({
     id: overrides.id,
@@ -37,6 +42,11 @@ function store(overrides: {
     content: overrides.content,
     timestamp: overrides.timestamp,
     is_from_me: overrides.is_from_me ?? false,
+    is_bot_message: overrides.is_bot_message,
+    is_reply: overrides.is_reply,
+    is_reply_to_assistant: overrides.is_reply_to_assistant,
+    reply_to_username: overrides.reply_to_username,
+    reply_to_message_id: overrides.reply_to_message_id,
   });
 }
 
@@ -137,6 +147,34 @@ describe('storeMessage', () => {
     );
     expect(messages).toHaveLength(1);
     expect(messages[0].content).toBe('updated');
+  });
+
+  it('stores reply-to-assistant metadata', () => {
+    storeChatMetadata('group@g.us', '2024-01-01T00:00:00.000Z');
+
+    store({
+      id: 'msg-reply',
+      chat_jid: 'group@g.us',
+      sender: '123@s.whatsapp.net',
+      sender_name: 'Alice',
+      content: 'Thanks',
+      timestamp: '2024-01-01T00:00:06.000Z',
+      is_reply: true,
+      is_reply_to_assistant: true,
+      reply_to_username: 'andy_ai_bot',
+      reply_to_message_id: '42',
+    });
+
+    const messages = getMessagesSince(
+      'group@g.us',
+      '2024-01-01T00:00:00.000Z',
+      'Andy',
+    );
+    expect(messages).toHaveLength(1);
+    expect(Boolean(messages[0].is_reply)).toBe(true);
+    expect(Boolean(messages[0].is_reply_to_assistant)).toBe(true);
+    expect(messages[0].reply_to_username).toBe('andy_ai_bot');
+    expect(messages[0].reply_to_message_id).toBe('42');
   });
 });
 

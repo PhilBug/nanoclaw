@@ -102,6 +102,12 @@ function createTextCtx(overrides: {
   messageId?: number;
   date?: number;
   entities?: any[];
+  replyToMessage?: {
+    messageId?: number;
+    fromId?: number;
+    username?: string;
+    firstName?: string;
+  };
 }) {
   const chatId = overrides.chatId ?? 100200300;
   const chatType = overrides.chatType ?? 'group';
@@ -121,8 +127,21 @@ function createTextCtx(overrides: {
       date: overrides.date ?? Math.floor(Date.now() / 1000),
       message_id: overrides.messageId ?? 1,
       entities: overrides.entities ?? [],
+      reply_to_message: overrides.replyToMessage
+        ? {
+            message_id: overrides.replyToMessage.messageId ?? 99,
+            from:
+              overrides.replyToMessage.fromId === undefined
+                ? undefined
+                : {
+                    id: overrides.replyToMessage.fromId,
+                    username: overrides.replyToMessage.username,
+                    first_name: overrides.replyToMessage.firstName,
+                  },
+          }
+        : undefined,
     },
-    me: { username: 'andy_ai_bot' },
+    me: { username: 'andy_ai_bot', id: 12345 },
     reply: vi.fn(),
   };
 }
@@ -136,6 +155,12 @@ function createMediaCtx(overrides: {
   messageId?: number;
   caption?: string;
   extra?: Record<string, any>;
+  replyToMessage?: {
+    messageId?: number;
+    fromId?: number;
+    username?: string;
+    firstName?: string;
+  };
 }) {
   const chatId = overrides.chatId ?? 100200300;
   return {
@@ -153,9 +178,22 @@ function createMediaCtx(overrides: {
       date: overrides.date ?? Math.floor(Date.now() / 1000),
       message_id: overrides.messageId ?? 1,
       caption: overrides.caption,
+      reply_to_message: overrides.replyToMessage
+        ? {
+            message_id: overrides.replyToMessage.messageId ?? 99,
+            from:
+              overrides.replyToMessage.fromId === undefined
+                ? undefined
+                : {
+                    id: overrides.replyToMessage.fromId,
+                    username: overrides.replyToMessage.username,
+                    first_name: overrides.replyToMessage.firstName,
+                  },
+          }
+        : undefined,
       ...(overrides.extra || {}),
     },
-    me: { username: 'andy_ai_bot' },
+    me: { username: 'andy_ai_bot', id: 12345 },
   };
 }
 
@@ -429,6 +467,84 @@ describe('TelegramChannel', () => {
         'tg:100200300',
         expect.objectContaining({
           timestamp: '2024-01-01T00:00:00.000Z',
+        }),
+      );
+    });
+
+    it('marks replies to the assistant explicitly', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const ctx = createTextCtx({
+        text: 'Thanks',
+        replyToMessage: {
+          messageId: 77,
+          fromId: 12345,
+          username: 'andy_ai_bot',
+        },
+      });
+      await triggerTextMessage(ctx);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({
+          is_reply: true,
+          is_reply_to_assistant: true,
+          reply_to_username: 'andy_ai_bot',
+          reply_to_message_id: '77',
+        }),
+      );
+    });
+
+    it('does not mark replies to other bots as replies to the assistant', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const ctx = createTextCtx({
+        text: 'Not for Andy',
+        replyToMessage: {
+          messageId: 78,
+          fromId: 54321,
+          username: 'traszka_bot',
+        },
+      });
+      await triggerTextMessage(ctx);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({
+          is_reply: true,
+          is_reply_to_assistant: false,
+          reply_to_username: 'traszka_bot',
+          reply_to_message_id: '78',
+        }),
+      );
+    });
+
+    it('does not mark replies to normal users as replies to the assistant', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const ctx = createTextCtx({
+        text: 'Not for Andy',
+        replyToMessage: {
+          messageId: 79,
+          fromId: 67890,
+          firstName: 'Bob',
+        },
+      });
+      await triggerTextMessage(ctx);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({
+          is_reply: true,
+          is_reply_to_assistant: false,
+          reply_to_username: 'Bob',
+          reply_to_message_id: '79',
         }),
       );
     });
@@ -707,6 +823,32 @@ describe('TelegramChannel', () => {
       await triggerMediaMessage('message:photo', ctx);
 
       expect(opts.onMessage).not.toHaveBeenCalled();
+    });
+
+    it('marks media replies to the assistant explicitly', async () => {
+      const opts = createTestOpts();
+      const channel = new TelegramChannel('test-token', opts);
+      await channel.connect();
+
+      const ctx = createMediaCtx({
+        replyToMessage: {
+          messageId: 88,
+          fromId: 12345,
+          username: 'andy_ai_bot',
+        },
+      });
+      await triggerMediaMessage('message:photo', ctx);
+
+      expect(opts.onMessage).toHaveBeenCalledWith(
+        'tg:100200300',
+        expect.objectContaining({
+          content: '[Photo]',
+          is_reply: true,
+          is_reply_to_assistant: true,
+          reply_to_username: 'andy_ai_bot',
+          reply_to_message_id: '88',
+        }),
+      );
     });
   });
 

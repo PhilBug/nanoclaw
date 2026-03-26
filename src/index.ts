@@ -165,6 +165,24 @@ export function _setRegisteredGroups(
   registeredGroups = groups;
 }
 
+function hasTriggerMessage(
+  chatJid: string,
+  trigger: string | undefined,
+  messages: NewMessage[],
+): boolean {
+  const triggerPattern = getTriggerPattern(trigger);
+  const allowlistCfg = loadSenderAllowlist();
+
+  return messages.some((message) => {
+    const matchesMentionTrigger =
+      triggerPattern.test(message.content.trim()) &&
+      (message.is_from_me ||
+        isTriggerAllowed(chatJid, message.sender, allowlistCfg));
+
+    return matchesMentionTrigger || Boolean(message.is_reply_to_assistant);
+  });
+}
+
 /**
  * Process all pending messages for a group.
  * Called by the GroupQueue when it's this group's turn.
@@ -192,15 +210,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   // For non-main groups, check if trigger is required and present
   if (!isMainGroup && group.requiresTrigger !== false) {
-    const triggerPattern = getTriggerPattern(group.trigger);
-    const allowlistCfg = loadSenderAllowlist();
-    const hasTrigger = missedMessages.some(
-      (m) =>
-        (triggerPattern.test(m.content.trim()) &&
-          (m.is_from_me ||
-            isTriggerAllowed(chatJid, m.sender, allowlistCfg))) ||
-        // Reply to bot's own message is also a valid trigger (Telegram bot usernames end with "_bot")
-        (m.is_reply && m.reply_to_username?.endsWith('_bot')),
+    const hasTrigger = hasTriggerMessage(
+      chatJid,
+      group.trigger,
+      missedMessages,
     );
     if (!hasTrigger) return true;
   }
@@ -424,15 +437,10 @@ async function startMessageLoop(): Promise<void> {
           // Non-trigger messages accumulate in DB and get pulled as
           // context when a trigger eventually arrives.
           if (needsTrigger) {
-            const triggerPattern = getTriggerPattern(group.trigger);
-            const allowlistCfg = loadSenderAllowlist();
-            const hasTrigger = groupMessages.some(
-              (m) =>
-                (triggerPattern.test(m.content.trim()) &&
-                  (m.is_from_me ||
-                    isTriggerAllowed(chatJid, m.sender, allowlistCfg))) ||
-                // Reply to bot's own message is also a valid trigger (Telegram bot usernames end with "_bot")
-                (m.is_reply && m.reply_to_username?.endsWith('_bot')),
+            const hasTrigger = hasTriggerMessage(
+              chatJid,
+              group.trigger,
+              groupMessages,
             );
             if (!hasTrigger) continue;
           }

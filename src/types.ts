@@ -53,6 +53,7 @@ export interface NewMessage {
   is_bot_message?: boolean;
   // Reply metadata fields
   is_reply?: boolean;
+  is_reply_to_assistant?: boolean;
   reply_to_username?: string | null;
   reply_to_message_id?: string | null;
 }

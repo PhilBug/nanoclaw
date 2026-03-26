@@ -32,6 +32,10 @@ function createSchema(database: Database.Database): void {
       timestamp TEXT,
       is_from_me INTEGER,
       is_bot_message INTEGER DEFAULT 0,
+      is_reply INTEGER DEFAULT 0,
+      reply_to_username TEXT,
+      reply_to_message_id TEXT,
+      is_reply_to_assistant INTEGER DEFAULT 0,
       PRIMARY KEY (id, chat_jid),
       FOREIGN KEY (chat_jid) REFERENCES chats(jid)
     );
@@ -147,13 +151,28 @@ function createSchema(database: Database.Database): void {
     /* columns already exist */
   }
 
-  // Add reply metadata columns if they don't exist (migration for Telegram reply_to_message support)
+  // Add reply metadata columns if they don't exist.
   try {
     database.exec(`ALTER TABLE messages ADD COLUMN is_reply INTEGER DEFAULT 0`);
+  } catch {
+    /* column already exists */
+  }
+  try {
     database.exec(`ALTER TABLE messages ADD COLUMN reply_to_username TEXT`);
+  } catch {
+    /* column already exists */
+  }
+  try {
     database.exec(`ALTER TABLE messages ADD COLUMN reply_to_message_id TEXT`);
   } catch {
-    /* columns already exist */
+    /* column already exists */
+  }
+  try {
+    database.exec(
+      `ALTER TABLE messages ADD COLUMN is_reply_to_assistant INTEGER DEFAULT 0`,
+    );
+  } catch {
+    /* column already exists */
   }
 }
 
@@ -283,7 +302,7 @@ export function setLastGroupSync(): void {
  */
 export function storeMessage(msg: NewMessage): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, is_reply, reply_to_username, reply_to_message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, is_reply, reply_to_username, reply_to_message_id, is_reply_to_assistant) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -296,6 +315,7 @@ export function storeMessage(msg: NewMessage): void {
     msg.is_reply ? 1 : 0,
     msg.reply_to_username || null,
     msg.reply_to_message_id || null,
+    msg.is_reply_to_assistant ? 1 : 0,
   );
 }
 
@@ -312,11 +332,12 @@ export function storeMessageDirect(msg: {
   is_from_me: boolean;
   is_bot_message?: boolean;
   is_reply?: boolean;
+  is_reply_to_assistant?: boolean;
   reply_to_username?: string | null;
   reply_to_message_id?: string | null;
 }): void {
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, is_reply, reply_to_username, reply_to_message_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_bot_message, is_reply, reply_to_username, reply_to_message_id, is_reply_to_assistant) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msg.id,
     msg.chat_jid,
@@ -329,6 +350,7 @@ export function storeMessageDirect(msg: {
     msg.is_reply ? 1 : 0,
     msg.reply_to_username || null,
     msg.reply_to_message_id || null,
+    msg.is_reply_to_assistant ? 1 : 0,
   );
 }
 
@@ -346,7 +368,7 @@ export function getNewMessages(
   // Subquery takes the N most recent, outer query re-sorts chronologically.
   const sql = `
     SELECT * FROM (
-      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_reply, reply_to_username, reply_to_message_id
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_reply, reply_to_username, reply_to_message_id, is_reply_to_assistant
       FROM messages
       WHERE timestamp > ? AND chat_jid IN (${placeholders})
         AND is_bot_message = 0 AND content NOT LIKE ?
@@ -379,7 +401,7 @@ export function getMessagesSince(
   // Subquery takes the N most recent, outer query re-sorts chronologically.
   const sql = `
     SELECT * FROM (
-      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_reply, reply_to_username, reply_to_message_id
+      SELECT id, chat_jid, sender, sender_name, content, timestamp, is_from_me, is_reply, reply_to_username, reply_to_message_id, is_reply_to_assistant
       FROM messages
       WHERE chat_jid = ? AND timestamp > ?
         AND is_bot_message = 0 AND content NOT LIKE ?

@@ -112,12 +112,11 @@ async function syncGroups(projectRoot: string): Promise<void> {
   try {
     const syncScript = `
 import makeWASocket, { useMultiFileAuthState, makeCacheableSignalKeyStore, Browsers } from '@whiskeysockets/baileys';
-import pino from 'pino';
 import path from 'path';
 import fs from 'fs';
 import Database from 'better-sqlite3';
 
-const logger = pino({ level: 'silent' });
+const logger = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} };
 const authDir = path.join('store', 'auth');
 const dbPath = path.join('store', 'messages.db');
 

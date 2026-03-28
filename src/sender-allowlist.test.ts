@@ -211,6 +211,6 @@ describe('isTriggerAllowed', () => {
       logDenied: true,
     };
     isTriggerAllowed('g1', 'eve', cfg);
-    // Logger.debug is called — we just verify no crash; logger is a real pino instance
+    // Logger.debug is called — we just verify no crash
   });
 });

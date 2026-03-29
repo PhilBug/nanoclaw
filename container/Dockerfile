@@ -28,6 +28,16 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
+# Install GitHub CLI
+ARG GH_CLI_VERSION=v2.89.0
+ARG TARGETARCH
+RUN GH_VER="${GH_CLI_VERSION#v}" \
+    && curl -fsSL "https://github.com/cli/cli/releases/download/${GH_CLI_VERSION}/gh_${GH_VER}_linux_${TARGETARCH}.tar.gz" \
+    | tar xz -C /tmp \
+    && cp /tmp/gh_${GH_VER}_linux_${TARGETARCH}/bin/gh /usr/local/bin/gh \
+    && rm -rf /tmp/gh_${GH_VER}_linux_${TARGETARCH} \
+    && gh --version
+
 # Set Chromium path for agent-browser
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium

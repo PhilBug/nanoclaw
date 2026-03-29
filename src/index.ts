@@ -13,6 +13,7 @@ import {
   TIMEZONE,
 } from './config.js';
 import { startCredentialProxy } from './credential-proxy.js';
+import { startHealthMonitor } from './health-monitor.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -716,6 +717,30 @@ async function main(): Promise<void> {
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
+
+  // Start health monitor (proactive alerts for Docker, channels, queue)
+  startHealthMonitor({
+    channels: () => channels,
+    queue,
+    registeredGroups: () => registeredGroups,
+    sendMessage: async (jid, rawText) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) {
+        // Fallback: try any connected channel for alert delivery
+        const fallback = channels.find((ch) => ch.isConnected());
+        if (!fallback) {
+          logger.warn({ jid }, 'No connected channel for health alert');
+          return;
+        }
+        const text = formatOutbound(rawText);
+        if (text) await fallback.sendMessage(jid, text);
+        return;
+      }
+      const text = formatOutbound(rawText);
+      if (text) await channel.sendMessage(jid, text);
+    },
+  });
+
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');
     process.exit(1);

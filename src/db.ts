@@ -573,6 +573,22 @@ export function logTaskRun(log: TaskRunLog): void {
 
 // --- Router state accessors ---
 
+/**
+ * Count container errors in the given time window.
+ * Used by the health monitor to detect abnormal error rates.
+ */
+export function getRecentContainerErrors(sinceMs: number): number {
+  const since = new Date(Date.now() - sinceMs).toISOString();
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) as count FROM task_run_logs WHERE status = 'error' AND run_at > ?`,
+    )
+    .get(since) as { count: number };
+  return row.count;
+}
+
+// --- Router state accessors (continued) ---
+
 export function getRouterState(key: string): string | undefined {
   const row = db
     .prepare('SELECT value FROM router_state WHERE key = ?')

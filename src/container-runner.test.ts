@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 import fs from 'fs';
+import path from 'path';
 
 // Sentinel markers must match container-runner.ts
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -43,6 +44,8 @@ vi.mock('fs', async () => {
       readdirSync: vi.fn(() => []),
       statSync: vi.fn(() => ({ isDirectory: () => false })),
       copyFileSync: vi.fn(),
+      cpSync: vi.fn(),
+      rmSync: vi.fn(),
     },
   };
 });
@@ -87,7 +90,7 @@ vi.mock('child_process', async () => {
   };
 });
 
-import { runContainerAgent, ContainerOutput } from './container-runner.js';
+import { runContainerAgent, ContainerOutput, _syncAgentRunnerSrc } from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
 
 const settingsFile =
@@ -345,5 +348,94 @@ describe('container-runner timeout behavior', () => {
         ANTHROPIC_DEFAULT_SONNET_MODEL: 'fresh-sonnet',
       },
     });
+  });
+});
+
+describe('_syncAgentRunnerSrc', () => {
+  const agentRunnerSrc = path.join(process.cwd(), 'container', 'agent-runner', 'src');
+  const groupAgentRunnerDir = '/tmp/nanoclaw-test-data/sessions/test-group/agent-runner-src';
+
+  // Vitest overloads make mockImplementation strict; cast to any to avoid
+  // PathLike vs string mismatches in test callbacks.
+  const mockReaddir = (fn: (dir: string) => fs.Dirent[]) =>
+    (fs.readdirSync as any).mockImplementation(fn);
+  const mockStat = (fn: (p: string) => { mtimeMs: number }) =>
+    (fs.statSync as any).mockImplementation(fn);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('cache miss (first copy) — rmSync + cpSync called', () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => p === agentRunnerSrc);
+    mockReaddir((dir) => {
+      if (dir === agentRunnerSrc) return [
+        { name: 'index.ts', isDirectory: () => false },
+      ] as unknown as fs.Dirent[];
+      return [];
+    });
+    vi.mocked(fs.statSync).mockReturnValue({ mtimeMs: 1000 } as fs.Stats);
+
+    _syncAgentRunnerSrc('test-group');
+
+    expect(fs.rmSync).toHaveBeenCalledWith(groupAgentRunnerDir, { recursive: true, force: true });
+    expect(fs.cpSync).toHaveBeenCalledWith(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+  });
+
+  it('cache hit (no copy needed) — neither called', () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    mockReaddir((dir) => {
+      if (dir === agentRunnerSrc || dir === groupAgentRunnerDir) return [
+        { name: 'index.ts', isDirectory: () => false },
+      ] as unknown as fs.Dirent[];
+      return [];
+    });
+    vi.mocked(fs.statSync).mockReturnValue({ mtimeMs: 1000 } as fs.Stats);
+
+    _syncAgentRunnerSrc('test-group');
+
+    expect(fs.cpSync).not.toHaveBeenCalled();
+    expect(fs.rmSync).not.toHaveBeenCalled();
+  });
+
+  it('cache stale (source newer) — rmSync then cpSync called', () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    mockReaddir((dir) => {
+      if (dir === agentRunnerSrc || dir === groupAgentRunnerDir) return [
+        { name: 'index.ts', isDirectory: () => false },
+      ] as unknown as fs.Dirent[];
+      return [];
+    });
+    mockStat((p) => {
+      if (p.startsWith(agentRunnerSrc)) return { mtimeMs: 2000 };
+      return { mtimeMs: 1000 };
+    });
+
+    _syncAgentRunnerSrc('test-group');
+
+    expect(fs.rmSync).toHaveBeenCalledWith(groupAgentRunnerDir, { recursive: true, force: true });
+    expect(fs.cpSync).toHaveBeenCalledWith(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+  });
+
+  it('non-index.ts file change triggers copy (original bug this PR fixed)', () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    mockReaddir((dir) => {
+      if (dir === agentRunnerSrc || dir === groupAgentRunnerDir) return [
+        { name: 'index.ts', isDirectory: () => false },
+        { name: 'ipc-mcp-stdio.ts', isDirectory: () => false },
+      ] as unknown as fs.Dirent[];
+      return [];
+    });
+    mockStat((p) => {
+      const basename = path.basename(p);
+      if (basename === 'index.ts') return { mtimeMs: 1000 };
+      if (p.startsWith(agentRunnerSrc)) return { mtimeMs: 3000 };
+      return { mtimeMs: 2000 };
+    });
+
+    _syncAgentRunnerSrc('test-group');
+
+    expect(fs.rmSync).toHaveBeenCalledWith(groupAgentRunnerDir, { recursive: true, force: true });
+    expect(fs.cpSync).toHaveBeenCalledWith(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
   });
 });

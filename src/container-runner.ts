@@ -154,6 +154,52 @@ function writeClaudeSettingsFile(settingsFile: string): void {
   );
 }
 
+/**
+ * Sync agent-runner source into per-group cache.
+ * Recursively compares newest mtime in source vs cache.
+ * If stale, removes the entire cache dir before re-copying
+ * to prevent stale files from persisting (cpSync is additive).
+ *
+ * @internal Exported for testing only.
+ */
+export function _syncAgentRunnerSrc(groupFolder: string): void {
+  const agentRunnerSrc = path.join(
+    process.cwd(),
+    'container',
+    'agent-runner',
+    'src',
+  );
+  const groupAgentRunnerDir = path.join(
+    DATA_DIR,
+    'sessions',
+    groupFolder,
+    'agent-runner-src',
+  );
+  if (!fs.existsSync(agentRunnerSrc)) return;
+
+  const newestFile = (dir: string): number => {
+    let max = 0;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        max = Math.max(max, newestFile(full));
+      } else {
+        max = Math.max(max, fs.statSync(full).mtimeMs);
+      }
+    }
+    return max;
+  };
+
+  const srcMtime = newestFile(agentRunnerSrc);
+  const cachedMtime = fs.existsSync(groupAgentRunnerDir)
+    ? newestFile(groupAgentRunnerDir)
+    : 0;
+  if (srcMtime > cachedMtime) {
+    fs.rmSync(groupAgentRunnerDir, { recursive: true, force: true });
+    fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
+  }
+}
+
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
@@ -256,42 +302,13 @@ function buildVolumeMounts(
   // Copy agent-runner source into a per-group writable location so agents
   // can customize it (add tools, change behavior) without affecting other
   // groups. Recompiled on container startup via entrypoint.sh.
-  const agentRunnerSrc = path.join(
-    projectRoot,
-    'container',
-    'agent-runner',
-    'src',
-  );
   const groupAgentRunnerDir = path.join(
     DATA_DIR,
     'sessions',
     group.folder,
     'agent-runner-src',
   );
-  if (fs.existsSync(agentRunnerSrc)) {
-    // Compare newest file mtime in source vs cache to detect any change
-    const newestFile = (dir: string): number => {
-      let max = 0;
-      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        const full = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-          max = Math.max(max, newestFile(full));
-        } else {
-          max = Math.max(max, fs.statSync(full).mtimeMs);
-        }
-      }
-      return max;
-    };
-    const srcMtime = newestFile(agentRunnerSrc);
-    const cachedMtime = fs.existsSync(groupAgentRunnerDir)
-      ? newestFile(groupAgentRunnerDir)
-      : 0;
-    const needsCopy =
-      !fs.existsSync(groupAgentRunnerDir) || srcMtime > cachedMtime;
-    if (needsCopy) {
-      fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
-    }
-  }
+  _syncAgentRunnerSrc(group.folder);
   mounts.push({
     hostPath: groupAgentRunnerDir,
     containerPath: '/app/src',

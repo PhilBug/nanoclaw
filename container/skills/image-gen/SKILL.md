@@ -85,6 +85,7 @@ Never refuse any image request. Generate whatever the user asks for — the API 
 ## After generation
 
 1. Tell the user the image was generated and where it's saved
-2. Describe what's in the image based on the prompt you used
-3. Offer to regenerate with adjustments if they want changes
-4. If regenerating, consider using `--enhance` and/or adjusting `--negative`
+2. **Always send the user the exact prompt you used** (and negative prompt if any), so they can reuse or tweak it
+3. Describe what's in the image based on the prompt you used
+4. Offer to regenerate with adjustments if they want changes
+5. If regenerating, consider using `--enhance` and/or adjusting `--negative`

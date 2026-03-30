@@ -269,13 +269,25 @@ function buildVolumeMounts(
     'agent-runner-src',
   );
   if (fs.existsSync(agentRunnerSrc)) {
-    const srcIndex = path.join(agentRunnerSrc, 'index.ts');
-    const cachedIndex = path.join(groupAgentRunnerDir, 'index.ts');
+    // Compare newest file mtime in source vs cache to detect any change
+    const newestFile = (dir: string): number => {
+      let max = 0;
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          max = Math.max(max, newestFile(full));
+        } else {
+          max = Math.max(max, fs.statSync(full).mtimeMs);
+        }
+      }
+      return max;
+    };
+    const srcMtime = newestFile(agentRunnerSrc);
+    const cachedMtime = fs.existsSync(groupAgentRunnerDir)
+      ? newestFile(groupAgentRunnerDir)
+      : 0;
     const needsCopy =
-      !fs.existsSync(groupAgentRunnerDir) ||
-      !fs.existsSync(cachedIndex) ||
-      (fs.existsSync(srcIndex) &&
-        fs.statSync(srcIndex).mtimeMs > fs.statSync(cachedIndex).mtimeMs);
+      !fs.existsSync(groupAgentRunnerDir) || srcMtime > cachedMtime;
     if (needsCopy) {
       fs.cpSync(agentRunnerSrc, groupAgentRunnerDir, { recursive: true });
     }

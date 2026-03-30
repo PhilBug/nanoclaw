@@ -1,5 +1,5 @@
 import https from 'https';
-import { Api, Bot } from 'grammy';
+import { Api, Bot, InputFile } from 'grammy';
 
 import {
   ASSISTANT_NAME,
@@ -353,6 +353,27 @@ export class TelegramChannel implements Channel {
       await this.bot.api.sendChatAction(numericId, 'typing');
     } catch (err) {
       logger.debug({ jid, err }, 'Failed to send Telegram typing indicator');
+    }
+  }
+
+  async sendMedia(
+    jid: string,
+    filePath: string,
+    caption?: string,
+  ): Promise<void> {
+    if (!this.bot) {
+      logger.warn('Telegram bot not initialized');
+      return;
+    }
+
+    try {
+      const numericId = Number(jid.replace(/^tg:/, ''));
+      await this.bot.api.sendPhoto(numericId, new InputFile(filePath), {
+        caption: caption || undefined,
+      });
+      logger.info({ jid, filePath }, 'Telegram photo sent');
+    } catch (err) {
+      logger.error({ jid, filePath, err }, 'Failed to send Telegram photo');
     }
   }
 }

@@ -58,7 +58,7 @@ interface VolumeMount {
   readonly: boolean;
 }
 
-const RUNTIME_ENV_KEYS = ['TAVILY_API_KEY', 'GITHUB_TOKEN'] as const;
+const RUNTIME_ENV_KEYS = ['TAVILY_API_KEY', 'GH_TOKEN'] as const;
 const MODEL_ENV_KEYS = [
   'ANTHROPIC_MODEL',
   'ANTHROPIC_DEFAULT_OPUS_MODEL',

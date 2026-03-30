@@ -16,7 +16,7 @@ Verify that `gh` is available and authenticated:
 gh auth status
 ```
 
-If `gh` is missing or authentication fails, stop and tell the user that GitHub CLI is not configured on this NanoClaw instance.
+If `gh` is missing or authentication fails, stop and tell the user that GitHub CLI is not configured on this NanoClaw instance. Make sure `GH_TOKEN` is set in the host `.env` file.
 
 ## Common operations
 

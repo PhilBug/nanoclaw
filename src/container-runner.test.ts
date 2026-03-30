@@ -41,8 +41,9 @@ vi.mock('fs', async () => {
       writeFileSync: vi.fn(),
       readFileSync: vi.fn(() => ''),
       readdirSync: vi.fn(() => []),
-      statSync: vi.fn(() => ({ isDirectory: () => false })),
+      statSync: vi.fn(() => ({ isDirectory: () => false, isFile: () => false })),
       copyFileSync: vi.fn(),
+      cpSync: vi.fn(),
     },
   };
 });
@@ -87,7 +88,13 @@ vi.mock('child_process', async () => {
   };
 });
 
-import { runContainerAgent, ContainerOutput } from './container-runner.js';
+import {
+  runContainerAgent,
+  ContainerOutput,
+  RUNTIME_ENV_KEYS,
+  _syncContainerSkills,
+  _syncRules,
+} from './container-runner.js';
 import type { RegisteredGroup } from './types.js';
 
 const settingsFile =
@@ -345,5 +352,107 @@ describe('container-runner timeout behavior', () => {
         ANTHROPIC_DEFAULT_SONNET_MODEL: 'fresh-sonnet',
       },
     });
+  });
+});
+
+// --- RUNTIME_ENV_KEYS allowlist ---
+
+describe('RUNTIME_ENV_KEYS', () => {
+  it('includes CONTEXT7_API_KEY for container env injection', () => {
+    expect(RUNTIME_ENV_KEYS).toContain('CONTEXT7_API_KEY');
+  });
+
+  it('includes all other required runtime keys', () => {
+    expect(RUNTIME_ENV_KEYS).toContain('TAVILY_API_KEY');
+    expect(RUNTIME_ENV_KEYS).toContain('GH_TOKEN');
+    expect(RUNTIME_ENV_KEYS).toContain('OPENROUTER_API_KEY');
+    expect(RUNTIME_ENV_KEYS).toContain('POLLINATIONS_API_KEY');
+  });
+});
+
+// --- _syncContainerSkills ---
+
+describe('_syncContainerSkills', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('copies skill directories into group sessions', () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readdirSync).mockReturnValue(['find-docs'] as any);
+    vi.mocked(fs.statSync).mockReturnValue({
+      isDirectory: () => true,
+    } as fs.Stats);
+
+    _syncContainerSkills('/sessions/.claude');
+
+    expect(fs.cpSync).toHaveBeenCalledWith(
+      expect.stringContaining('container/skills/find-docs'),
+      expect.stringContaining('sessions/.claude/skills/find-docs'),
+      { recursive: true },
+    );
+  });
+
+  it('skips non-directory entries', () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readdirSync).mockReturnValue(['README.md'] as any);
+    vi.mocked(fs.statSync).mockReturnValue({
+      isDirectory: () => false,
+    } as fs.Stats);
+
+    _syncContainerSkills('/sessions/.claude');
+
+    expect(fs.cpSync).not.toHaveBeenCalled();
+  });
+
+  it('does nothing when container/skills/ does not exist', () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    _syncContainerSkills('/sessions/.claude');
+
+    expect(fs.readdirSync).not.toHaveBeenCalled();
+  });
+});
+
+// --- _syncRules ---
+
+describe('_syncRules', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('copies rule files into group sessions', () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readdirSync).mockReturnValue(['context7.md'] as any);
+    vi.mocked(fs.statSync).mockReturnValue({
+      isFile: () => true,
+    } as fs.Stats);
+
+    _syncRules('/sessions/.claude');
+
+    expect(fs.cpSync).toHaveBeenCalledWith(
+      expect.stringContaining('.claude/rules/context7.md'),
+      expect.stringContaining('sessions/.claude/rules/context7.md'),
+    );
+  });
+
+  it('skips subdirectories inside .claude/rules/', () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readdirSync).mockReturnValue(['nested-dir'] as any);
+    vi.mocked(fs.statSync).mockReturnValue({
+      isFile: () => false,
+    } as fs.Stats);
+
+    _syncRules('/sessions/.claude');
+
+    expect(fs.cpSync).not.toHaveBeenCalled();
+  });
+
+  it('does nothing when .claude/rules/ does not exist', () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    _syncRules('/sessions/.claude');
+
+    expect(fs.readdirSync).not.toHaveBeenCalled();
   });
 });

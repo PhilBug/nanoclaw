@@ -58,11 +58,13 @@ interface VolumeMount {
   readonly: boolean;
 }
 
-const RUNTIME_ENV_KEYS = [
+/** @internal - exported for testing */
+export const RUNTIME_ENV_KEYS = [
   'TAVILY_API_KEY',
   'GH_TOKEN',
   'POLLINATIONS_API_KEY',
   'OPENROUTER_API_KEY',
+  'CONTEXT7_API_KEY',
 ] as const;
 const MODEL_ENV_KEYS = [
   'ANTHROPIC_MODEL',
@@ -91,7 +93,8 @@ function escapeShellSingleQuoted(value: string): string {
   return value.replace(/'/g, `'\\''`);
 }
 
-function writeRuntimeEnvScript(scriptPath: string): void {
+/** @internal - exported for testing */
+export function writeRuntimeEnvScript(scriptPath: string): void {
   // Keep this allowlist narrow: these values are intentionally exposed to the
   // container so runtime-only skills can authenticate with external services.
   const runtimeEnv = readEnvFile([...RUNTIME_ENV_KEYS]);
@@ -152,6 +155,33 @@ function writeClaudeSettingsFile(settingsFile: string): void {
       2,
     ) + '\n',
   );
+}
+
+/** @internal - exported for testing */
+export function _syncContainerSkills(groupSessionsDir: string): void {
+  const skillsSrc = path.join(process.cwd(), 'container', 'skills');
+  const skillsDst = path.join(groupSessionsDir, 'skills');
+  if (fs.existsSync(skillsSrc)) {
+    for (const skillDir of fs.readdirSync(skillsSrc)) {
+      const srcDir = path.join(skillsSrc, skillDir);
+      if (!fs.statSync(srcDir).isDirectory()) continue;
+      const dstDir = path.join(skillsDst, skillDir);
+      fs.cpSync(srcDir, dstDir, { recursive: true });
+    }
+  }
+}
+
+/** @internal - exported for testing */
+export function _syncRules(groupSessionsDir: string): void {
+  const rulesSrc = path.join(process.cwd(), '.claude', 'rules');
+  const rulesDst = path.join(groupSessionsDir, 'rules');
+  if (fs.existsSync(rulesSrc)) {
+    for (const ruleFile of fs.readdirSync(rulesSrc)) {
+      const srcFile = path.join(rulesSrc, ruleFile);
+      if (!fs.statSync(srcFile).isFile()) continue;
+      fs.cpSync(srcFile, path.join(rulesDst, ruleFile));
+    }
+  }
 }
 
 function buildVolumeMounts(
@@ -225,16 +255,10 @@ function buildVolumeMounts(
   writeRuntimeEnvScript(path.join(groupSessionsDir, 'runtime-env.sh'));
 
   // Sync skills from container/skills/ into each group's .claude/skills/
-  const skillsSrc = path.join(process.cwd(), 'container', 'skills');
-  const skillsDst = path.join(groupSessionsDir, 'skills');
-  if (fs.existsSync(skillsSrc)) {
-    for (const skillDir of fs.readdirSync(skillsSrc)) {
-      const srcDir = path.join(skillsSrc, skillDir);
-      if (!fs.statSync(srcDir).isDirectory()) continue;
-      const dstDir = path.join(skillsDst, skillDir);
-      fs.cpSync(srcDir, dstDir, { recursive: true });
-    }
-  }
+  _syncContainerSkills(groupSessionsDir);
+  // Sync rules from .claude/rules/ into each group's .claude/rules/
+  _syncRules(groupSessionsDir);
+
   mounts.push({
     hostPath: groupSessionsDir,
     containerPath: '/home/node/.claude',

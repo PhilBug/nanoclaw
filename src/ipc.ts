@@ -109,7 +109,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     data.caption,
                   );
                   logger.info(
-                    { chatJid: data.chatJid, sourceGroup, filePath: data.filePath },
+                    {
+                      chatJid: data.chatJid,
+                      sourceGroup,
+                      filePath: data.filePath,
+                    },
                     'IPC media sent',
                   );
                 } else {

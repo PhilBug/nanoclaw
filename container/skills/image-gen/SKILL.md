@@ -5,7 +5,7 @@ description: Generate images using the Pollinations API. Use whenever the user a
 
 # Image Generation
 
-Generate images on demand using the Pollinations API. The script at `/home/node/.claude/skills/image-gen/scripts/generate.sh` handles everything: model validation, API calls, and file saving.
+Generate images on demand using the Pollinations API. The script at `/home/node/.claude/skills/image-gen/scripts/generate.mjs` handles everything: model validation, API calls, and file saving.
 
 ## Quick Start
 
@@ -14,7 +14,7 @@ Generate images on demand using the Pollinations API. The script at `/home/node/
 source /home/node/.claude/runtime-env.sh
 
 # Generate an image
-bash /home/node/.claude/skills/image-gen/scripts/generate.sh \
+node /home/node/.claude/skills/image-gen/scripts/generate.mjs \
   --prompt "a majestic lion on a mountain peak at golden hour"
 ```
 
@@ -37,7 +37,7 @@ Default is `zimage` (fast, good quality). The user can request a different model
 
 To see current free models at any time:
 ```bash
-bash /home/node/.claude/skills/image-gen/scripts/generate.sh --list-models
+node /home/node/.claude/skills/image-gen/scripts/generate.mjs --list-models
 ```
 
 Models that support image input (for editing): `gptimage`, `qwen-image`, `klein`. These change over time — `--list-models` always shows the latest.

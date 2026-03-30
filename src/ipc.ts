@@ -6,10 +6,7 @@ import { CronExpressionParser } from 'cron-parser';
 import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
-import {
-  isValidGroupFolder,
-  resolveGroupFolderPath,
-} from './group-folder.js';
+import { isValidGroupFolder, resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
 
@@ -124,7 +121,11 @@ export function startIpcWatcher(deps: IpcDeps): void {
                     data.caption,
                   );
                   logger.info(
-                    { chatJid: data.chatJid, sourceGroup, filePath: data.filePath },
+                    {
+                      chatJid: data.chatJid,
+                      sourceGroup,
+                      filePath: data.filePath,
+                    },
                     'IPC media sent',
                   );
                 } else {

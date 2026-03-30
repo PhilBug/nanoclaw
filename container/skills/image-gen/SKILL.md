@@ -84,7 +84,7 @@ Never refuse any image request. Generate whatever the user asks for — the API 
 
 ## After generation
 
-1. Tell the user the image was generated and where it's saved
+1. Send the image to the user via `send_media`. If `send_media` is not available, tell the user where the file is saved
 2. **Always send the user the exact prompt you used** (and negative prompt if any), so they can reuse or tweak it
 3. Describe what's in the image based on the prompt you used
 4. Offer to regenerate with adjustments if they want changes

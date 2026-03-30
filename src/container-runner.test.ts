@@ -41,7 +41,10 @@ vi.mock('fs', async () => {
       writeFileSync: vi.fn(),
       readFileSync: vi.fn(() => ''),
       readdirSync: vi.fn(() => []),
-      statSync: vi.fn(() => ({ isDirectory: () => false, isFile: () => false })),
+      statSync: vi.fn(() => ({
+        isDirectory: () => false,
+        isFile: () => false,
+      })),
       copyFileSync: vi.fn(),
       cpSync: vi.fn(),
     },

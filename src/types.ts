@@ -116,10 +116,10 @@ export type OnChatMetadata = (
 
 export interface HealthStatus {
   timestamp: string;
-  docker: { ok: boolean; latencyMs: number };
+  docker: { ok: boolean; latencyMs: number; consecutiveFailures: number };
   channels: Array<{ name: string; connected: boolean }>;
   queue: { activeCount: number; waitingCount: number; groupCount: number };
-  containerErrors: { recentErrors: number; consecutiveFailures: number };
+  containerErrors: { recentErrors: number };
   uptime: number; // process.uptime() in seconds
 }
 

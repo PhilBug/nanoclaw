@@ -20,7 +20,7 @@ Then stop — do not generate the report.
 
 ## How to gather the information
 
-The health monitor writes a snapshot to the IPC directory every 30 seconds. Read it:
+The health monitor writes a snapshot to the IPC directory periodically (default: every 30 seconds, configurable via `HEALTH_CHECK_INTERVAL`). Read it:
 
 ```bash
 cat /workspace/ipc/health_snapshot.json 2>/dev/null || echo "NO_SNAPSHOT"

@@ -9,7 +9,7 @@
  * Health snapshots are written to the main group's IPC directory so the
  * /health container skill can read them.
  */
-import { execSync } from 'child_process';
+import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -22,6 +22,7 @@ import {
   HEALTH_DOCKER_TIMEOUT,
   HEALTH_ERROR_WINDOW_MS,
   HEALTH_QUEUE_BACKLOG_THRESHOLD,
+  MAX_CONCURRENT_CONTAINERS,
 } from './config.js';
 import { DATA_DIR } from './config.js';
 import {
@@ -79,8 +80,8 @@ async function runHealthLoop(deps: HealthMonitorDependencies): Promise<void> {
 async function runHealthCheck(deps: HealthMonitorDependencies): Promise<void> {
   const now = new Date().toISOString();
 
-  // 1. Check Docker daemon (highest priority)
-  const dockerResult = checkDockerDaemon();
+  // 1. Check Docker daemon (highest priority) — non-blocking
+  const dockerResult = await checkDockerDaemon();
 
   // 2. Check channel connections
   const channels = deps.channels();
@@ -98,17 +99,14 @@ async function runHealthCheck(deps: HealthMonitorDependencies): Promise<void> {
   // Build health status snapshot
   const healthStatus: HealthStatus = {
     timestamp: now,
-    docker: dockerResult,
+    docker: { ...dockerResult, consecutiveFailures: getConsecutiveFailures() },
     channels: channelStatuses,
     queue: {
       activeCount: queueStats.activeCount,
       waitingCount: queueStats.waitingCount,
       groupCount: queueStats.groupCount,
     },
-    containerErrors: {
-      recentErrors,
-      consecutiveFailures: getConsecutiveFailures(),
-    },
+    containerErrors: { recentErrors },
     uptime: process.uptime(),
   };
 
@@ -123,17 +121,18 @@ async function runHealthCheck(deps: HealthMonitorDependencies): Promise<void> {
   await processAlerts(deps, mainGroup.jid, mainGroup, healthStatus, channels);
 }
 
-function checkDockerDaemon(): { ok: boolean; latencyMs: number } {
+function checkDockerDaemon(): Promise<{ ok: boolean; latencyMs: number }> {
   const start = Date.now();
-  try {
-    execSync('docker info', {
-      stdio: 'pipe',
-      timeout: HEALTH_DOCKER_TIMEOUT,
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      resolve({ ok: false, latencyMs: Date.now() - start });
+    }, HEALTH_DOCKER_TIMEOUT);
+
+    exec('docker info', { timeout: HEALTH_DOCKER_TIMEOUT }, (err) => {
+      clearTimeout(timeout);
+      resolve({ ok: !err, latencyMs: Date.now() - start });
     });
-    return { ok: true, latencyMs: Date.now() - start };
-  } catch {
-    return { ok: false, latencyMs: Date.now() - start };
-  }
+  });
 }
 
 function getConsecutiveFailures(): number {
@@ -173,13 +172,14 @@ async function processAlerts(
   if (!status.docker.ok) {
     setRouterState('health_was_docker_down', '1');
     incrementConsecutiveFailures();
-    if (shouldAlert('docker')) {
-      await sendAlert(
+    if (canAlert('docker')) {
+      const sent = await sendAlert(
         deps,
         mainJid,
         channels,
-        `🔴 CRITICAL: Docker daemon is unreachable (latency: ${status.docker.latencyMs}ms). Agent containers cannot run. Consecutive failures: ${getConsecutiveFailures()}.`,
+        `🔴 CRITICAL: Docker daemon is unreachable (latency: ${status.docker.latencyMs}ms). Agent containers cannot run. Consecutive failures: ${status.docker.consecutiveFailures}.`,
       );
+      if (sent) markAlerted('docker');
     }
   } else if (wasDockerDown) {
     // Recovery!
@@ -203,13 +203,14 @@ async function processAlerts(
   if (disconnectedChannels.length > 0) {
     const names = disconnectedChannels.map((ch) => ch.name).join(', ');
     setRouterState('health_was_channels_down', '1');
-    if (shouldAlert('channel')) {
-      await sendAlert(
+    if (canAlert('channel')) {
+      const sent = await sendAlert(
         deps,
         mainJid,
         channels,
         `🟡 WARNING: Channel(s) disconnected: ${names}`,
       );
+      if (sent) markAlerted('channel');
     }
   } else if (wasChannelsDown) {
     setRouterState('health_was_channels_down', '0');
@@ -222,51 +223,80 @@ async function processAlerts(
   }
 
   // --- Queue backlog ---
+  const wasQueueBacklog =
+    getRouterState('health_was_queue_backlog') === '1';
+
   if (status.queue.waitingCount > HEALTH_QUEUE_BACKLOG_THRESHOLD) {
-    if (shouldAlert('queue')) {
-      await sendAlert(
+    setRouterState('health_was_queue_backlog', '1');
+    if (canAlert('queue')) {
+      const sent = await sendAlert(
         deps,
         mainJid,
         channels,
-        `🟡 WARNING: ${status.queue.waitingCount} groups waiting in queue (${status.queue.activeCount}/${5} containers active).`,
+        `🟡 WARNING: ${status.queue.waitingCount} groups waiting in queue (${status.queue.activeCount}/${MAX_CONCURRENT_CONTAINERS} containers active).`,
       );
+      if (sent) markAlerted('queue');
     }
+  } else if (wasQueueBacklog) {
+    setRouterState('health_was_queue_backlog', '0');
+    await sendAlert(
+      deps,
+      mainJid,
+      channels,
+      `🟢 RECOVERY: Queue backlog cleared.`,
+    );
   }
 
   // --- Container error rate ---
+  const wasErrorRateHigh =
+    getRouterState('health_was_error_rate_high') === '1';
+
   if (status.containerErrors.recentErrors > HEALTH_CONTAINER_ERROR_THRESHOLD) {
-    const lastAlertKey = 'health_last_alert_errors';
-    const lastAlert = getRouterState(lastAlertKey);
-    const cooldown = HEALTH_ALERT_COOLDOWN_CHANNEL;
-    if (!lastAlert || Date.now() - new Date(lastAlert).getTime() > cooldown) {
-      await sendAlert(
+    setRouterState('health_was_error_rate_high', '1');
+    if (canAlert('errors')) {
+      const sent = await sendAlert(
         deps,
         mainJid,
         channels,
         `🟡 WARNING: ${status.containerErrors.recentErrors} container errors in the last ${HEALTH_ERROR_WINDOW_MS / 60000} minutes.`,
       );
-      setRouterState(lastAlertKey, new Date().toISOString());
+      if (sent) markAlerted('errors');
     }
+  } else if (wasErrorRateHigh) {
+    setRouterState('health_was_error_rate_high', '0');
+    await sendAlert(
+      deps,
+      mainJid,
+      channels,
+      `🟢 RECOVERY: Container error rate returned to normal.`,
+    );
   }
 }
 
-function shouldAlert(type: 'docker' | 'channel' | 'queue'): boolean {
-  const key = `health_last_alert_${type}`;
-  const cooldown =
-    type === 'docker'
-      ? HEALTH_ALERT_COOLDOWN_DOCKER
-      : type === 'channel'
-        ? HEALTH_ALERT_COOLDOWN_CHANNEL
-        : HEALTH_ALERT_COOLDOWN_QUEUE;
+type AlertType = 'docker' | 'channel' | 'queue' | 'errors';
 
+function getAlertCooldown(type: AlertType): number {
+  switch (type) {
+    case 'docker': return HEALTH_ALERT_COOLDOWN_DOCKER;
+    case 'channel': return HEALTH_ALERT_COOLDOWN_CHANNEL;
+    case 'queue': return HEALTH_ALERT_COOLDOWN_QUEUE;
+    case 'errors': return HEALTH_ALERT_COOLDOWN_CHANNEL;
+  }
+}
+
+function canAlert(type: AlertType): boolean {
+  const key = `health_last_alert_${type}`;
   const lastAlert = getRouterState(key);
+  const cooldown = getAlertCooldown(type);
   if (lastAlert) {
     const elapsed = Date.now() - new Date(lastAlert).getTime();
     if (elapsed < cooldown) return false;
   }
-
-  setRouterState(key, new Date().toISOString());
   return true;
+}
+
+function markAlerted(type: AlertType): void {
+  setRouterState(`health_last_alert_${type}`, new Date().toISOString());
 }
 
 async function sendAlert(
@@ -274,17 +304,20 @@ async function sendAlert(
   jid: string,
   channels: Channel[],
   text: string,
-): Promise<void> {
+): Promise<boolean> {
   try {
     await deps.sendMessage(jid, text);
     logger.info({ jid }, 'Health alert sent');
+    return true;
   } catch (err) {
     // If primary channel fails, try fallback
     logger.warn(
       { jid, err },
       'Failed to send health alert via primary channel, trying fallback',
     );
-    const fallback = channels.find((ch) => ch.isConnected());
+    const fallback = channels.find(
+      (ch) => ch.isConnected() && ch.ownsJid(jid),
+    );
     if (fallback) {
       try {
         await fallback.sendMessage(jid, text);
@@ -292,6 +325,7 @@ async function sendAlert(
           { jid, fallbackChannel: fallback.name },
           'Health alert sent via fallback channel',
         );
+        return true;
       } catch (fallbackErr) {
         logger.error(
           { jid, fallbackChannel: fallback.name, err: fallbackErr },
@@ -304,6 +338,7 @@ async function sendAlert(
         'No connected channel available for health alert',
       );
     }
+    return false;
   }
 }
 

@@ -724,20 +724,34 @@ async function main(): Promise<void> {
     queue,
     registeredGroups: () => registeredGroups,
     sendMessage: async (jid, rawText) => {
-      const channel = findChannel(channels, jid);
+      const text = formatOutbound(rawText);
+      if (!text) return;
+
+      let channel = findChannel(channels, jid);
+
+      // If the owning channel is disconnected, treat as unavailable
+      if (channel && !channel.isConnected()) {
+        logger.warn(
+          { jid, channel: channel.name },
+          'Owning channel for health alert is disconnected; trying fallback',
+        );
+        channel = undefined;
+      }
+
       if (!channel) {
-        // Fallback: try any connected channel for alert delivery
-        const fallback = channels.find((ch) => ch.isConnected());
+        // Fallback: try any connected channel that owns this JID
+        const fallback = channels.find(
+          (ch) => ch.isConnected() && ch.ownsJid(jid),
+        );
         if (!fallback) {
           logger.warn({ jid }, 'No connected channel for health alert');
           return;
         }
-        const text = formatOutbound(rawText);
-        if (text) await fallback.sendMessage(jid, text);
+        await fallback.sendMessage(jid, text);
         return;
       }
-      const text = formatOutbound(rawText);
-      if (text) await channel.sendMessage(jid, text);
+
+      await channel.sendMessage(jid, text);
     },
   });
 

@@ -29,6 +29,7 @@ interface ContainerInput {
   isScheduledTask?: boolean;
   assistantName?: string;
   script?: string;
+  imageAttachments?: Array<{ relativePath: string; mediaType: string }>;
 }
 
 interface ContainerOutput {
@@ -51,10 +52,26 @@ interface SessionsIndex {
 
 interface SDKUserMessage {
   type: 'user';
-  message: { role: 'user'; content: string };
+  message: { role: 'user'; content: string | ContentBlock[] };
   parent_tool_use_id: null;
   session_id: string;
 }
+
+interface ImageContentBlock {
+  type: 'image';
+  source: {
+    type: 'base64';
+    media_type: string;
+    data: string;
+  };
+}
+
+interface TextContentBlock {
+  type: 'text';
+  text: string;
+}
+
+type ContentBlock = ImageContentBlock | TextContentBlock;
 
 const IPC_INPUT_DIR = '/workspace/ipc/input';
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
@@ -73,6 +90,16 @@ class MessageStream {
     this.queue.push({
       type: 'user',
       message: { role: 'user', content: text },
+      parent_tool_use_id: null,
+      session_id: '',
+    });
+    this.waiting?.();
+  }
+
+  pushMultimodal(blocks: ContentBlock[]): void {
+    this.queue.push({
+      type: 'user',
+      message: { role: 'user', content: blocks },
       parent_tool_use_id: null,
       session_id: '',
     });
@@ -340,7 +367,64 @@ async function runQuery(
   resumeAt?: string,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
   const stream = new MessageStream();
-  stream.push(prompt);
+
+  // If there are image attachments, load them and send as multimodal content
+  if (containerInput.imageAttachments && containerInput.imageAttachments.length > 0) {
+    const attachmentsBaseDir = path.resolve('/workspace/group');
+    const MAX_ATTACHMENTS = 10;
+    const MAX_BYTES_PER_FILE = 10 * 1024 * 1024; // 10 MB
+    const MAX_TOTAL_BYTES = 20 * 1024 * 1024; // 20 MB
+    const blocks: ContentBlock[] = [];
+    let totalBytes = 0;
+    const attachments = containerInput.imageAttachments.slice(0, MAX_ATTACHMENTS);
+    if (containerInput.imageAttachments.length > MAX_ATTACHMENTS) {
+      log(`Trimmed image attachments from ${containerInput.imageAttachments.length} to ${MAX_ATTACHMENTS}`);
+    }
+    for (const att of attachments) {
+      const imgPath = path.resolve(attachmentsBaseDir, att.relativePath);
+      // Enforce containment within the attachments directory
+      if (!imgPath.startsWith(attachmentsBaseDir + path.sep) && imgPath !== attachmentsBaseDir) {
+        log(`Skipping image attachment with invalid path: ${att.relativePath}`);
+        continue;
+      }
+      try {
+        if (fs.existsSync(imgPath)) {
+          const fileBuffer = fs.readFileSync(imgPath);
+          if (fileBuffer.length > MAX_BYTES_PER_FILE) {
+            log(`Skipping image attachment exceeding ${MAX_BYTES_PER_FILE / 1024 / 1024}MB: ${att.relativePath}`);
+            continue;
+          }
+          totalBytes += fileBuffer.length;
+          if (totalBytes > MAX_TOTAL_BYTES) {
+            log(`Skipping image attachment: total size would exceed ${MAX_TOTAL_BYTES / 1024 / 1024}MB`);
+            break;
+          }
+          const data = fileBuffer.toString('base64');
+          blocks.push({
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: att.mediaType,
+              data,
+            },
+          });
+          log(`Loaded image attachment: ${att.relativePath} (${(data.length * 0.75 / 1024).toFixed(0)} KB)`);
+        } else {
+          log(`Image attachment not found: ${imgPath}`);
+        }
+      } catch (err) {
+        log(`Failed to load image attachment ${att.relativePath}: ${err}`);
+      }
+    }
+    if (blocks.length > 0) {
+      blocks.push({ type: 'text', text: prompt });
+      stream.pushMultimodal(blocks);
+    } else {
+      stream.push(prompt);
+    }
+  } else {
+    stream.push(prompt);
+  }
 
   // Poll IPC for follow-up messages and _close sentinel during the query
   let ipcPolling = true;

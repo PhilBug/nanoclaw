@@ -1,13 +1,17 @@
 import https from 'https';
+import path from 'path';
 import { Api, Bot, InputFile } from 'grammy';
 
 import {
   ASSISTANT_NAME,
   DEFAULT_TRIGGER,
+  GROUPS_DIR,
   getTriggerPattern,
 } from '../config.js';
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
+import { processImage } from '../image.js';
+import { resolveGroupFolderPath } from '../group-folder.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
   Channel,
@@ -21,6 +25,53 @@ export interface TelegramChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+}
+
+const MAX_DOWNLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
+const DOWNLOAD_TIMEOUT_MS = 30_000; // 30 seconds
+
+function downloadWithLimits(url: string): Promise<Buffer> {
+  return new Promise<Buffer>((resolve, reject) => {
+    const req = https.get(url, (res) => {
+      const status = res.statusCode || 0;
+
+      // Reject on HTTP error status codes
+      if (status >= 400) {
+        res.resume();
+        reject(new Error(`Telegram photo download failed with status ${status}`));
+        return;
+      }
+
+      // Follow redirects (3xx)
+      if (status >= 300 && status < 400 && res.headers.location) {
+        res.resume();
+        downloadWithLimits(res.headers.location).then(resolve, reject);
+        return;
+      }
+
+      const chunks: Buffer[] = [];
+      let totalBytes = 0;
+
+      res.on('data', (chunk: Buffer) => {
+        totalBytes += chunk.length;
+        if (totalBytes > MAX_DOWNLOAD_BYTES) {
+          res.destroy();
+          reject(new Error('Telegram photo exceeds maximum allowed download size'));
+        } else {
+          chunks.push(chunk);
+        }
+      });
+
+      res.on('end', () => resolve(Buffer.concat(chunks)));
+      res.on('error', reject);
+    });
+
+    req.setTimeout(DOWNLOAD_TIMEOUT_MS, () => {
+      req.destroy(new Error('Telegram photo download timed out'));
+    });
+
+    req.on('error', reject);
+  });
 }
 
 /**
@@ -264,7 +315,95 @@ export class TelegramChannel implements Channel {
       });
     };
 
-    this.bot.on('message:photo', (ctx) => storeNonText(ctx, '[Photo]'));
+    this.bot.on('message:photo', async (ctx) => {
+      const chatJid = `tg:${ctx.chat.id}`;
+      const group = this.opts.registeredGroups()[chatJid];
+      if (!group) return;
+
+      const timestamp = new Date(ctx.message.date * 1000).toISOString();
+      const senderName =
+        ctx.from?.first_name ||
+        ctx.from?.username ||
+        ctx.from?.id?.toString() ||
+        'Unknown';
+      const caption = ctx.message.caption || undefined;
+      const replyMetadata = getReplyMetadata(ctx);
+
+      const isGroup =
+        ctx.chat.type === 'group' || ctx.chat.type === 'supergroup';
+      this.opts.onChatMetadata(
+        chatJid,
+        timestamp,
+        undefined,
+        'telegram',
+        isGroup,
+      );
+
+      // Download and process the photo
+      try {
+        const photo = ctx.message.photo;
+        // Telegram sends multiple sizes; pick the largest
+        const largest = photo[photo.length - 1];
+        const file = await ctx.api.getFile(largest.file_id);
+        if (!file.file_path) {
+          logger.warn('Telegram photo has no file_path after getFile');
+          this.opts.onMessage(chatJid, {
+            id: ctx.message.message_id.toString(),
+            chat_jid: chatJid,
+            sender: ctx.from?.id?.toString() || '',
+            sender_name: senderName,
+            content: `[Photo]${caption ? ` ${caption}` : ''}`,
+            timestamp,
+            is_from_me: false,
+            ...replyMetadata,
+          });
+          return;
+        }
+
+        const fileUrl = `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
+        const buffer = await downloadWithLimits(fileUrl);
+
+        const groupDir = resolveGroupFolderPath(group.folder);
+        const processed = await processImage(buffer, groupDir, caption);
+
+        if (processed) {
+          logger.info({ chatJid, path: processed.relativePath }, 'Processed Telegram photo');
+          this.opts.onMessage(chatJid, {
+            id: ctx.message.message_id.toString(),
+            chat_jid: chatJid,
+            sender: ctx.from?.id?.toString() || '',
+            sender_name: senderName,
+            content: processed.content,
+            timestamp,
+            is_from_me: false,
+            ...replyMetadata,
+          });
+        } else {
+          this.opts.onMessage(chatJid, {
+            id: ctx.message.message_id.toString(),
+            chat_jid: chatJid,
+            sender: ctx.from?.id?.toString() || '',
+            sender_name: senderName,
+            content: `[Photo]${caption ? ` ${caption}` : ''}`,
+            timestamp,
+            is_from_me: false,
+            ...replyMetadata,
+          });
+        }
+      } catch (err) {
+        logger.error({ chatJid, err }, 'Failed to download Telegram photo');
+        this.opts.onMessage(chatJid, {
+          id: ctx.message.message_id.toString(),
+          chat_jid: chatJid,
+          sender: ctx.from?.id?.toString() || '',
+          sender_name: senderName,
+          content: `[Photo]${caption ? ` ${caption}` : ''}`,
+          timestamp,
+          is_from_me: false,
+          ...replyMetadata,
+        });
+      }
+    });
     this.bot.on('message:video', (ctx) => storeNonText(ctx, '[Video]'));
     this.bot.on('message:voice', (ctx) => storeNonText(ctx, '[Voice message]'));
     this.bot.on('message:audio', (ctx) => storeNonText(ctx, '[Audio]'));

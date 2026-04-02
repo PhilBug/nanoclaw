@@ -11,6 +11,7 @@ import {
 import { readEnvFile } from '../env.js';
 import { logger } from '../logger.js';
 import { processImage } from '../image.js';
+import { resolveGroupFolderPath } from '../group-folder.js';
 import { registerChannel, ChannelOpts } from './registry.js';
 import {
   Channel,
@@ -24,6 +25,53 @@ export interface TelegramChannelOpts {
   onMessage: OnInboundMessage;
   onChatMetadata: OnChatMetadata;
   registeredGroups: () => Record<string, RegisteredGroup>;
+}
+
+const MAX_DOWNLOAD_BYTES = 10 * 1024 * 1024; // 10 MB
+const DOWNLOAD_TIMEOUT_MS = 30_000; // 30 seconds
+
+function downloadWithLimits(url: string): Promise<Buffer> {
+  return new Promise<Buffer>((resolve, reject) => {
+    const req = https.get(url, (res) => {
+      const status = res.statusCode || 0;
+
+      // Reject on HTTP error status codes
+      if (status >= 400) {
+        res.resume();
+        reject(new Error(`Telegram photo download failed with status ${status}`));
+        return;
+      }
+
+      // Follow redirects (3xx)
+      if (status >= 300 && status < 400 && res.headers.location) {
+        res.resume();
+        downloadWithLimits(res.headers.location).then(resolve, reject);
+        return;
+      }
+
+      const chunks: Buffer[] = [];
+      let totalBytes = 0;
+
+      res.on('data', (chunk: Buffer) => {
+        totalBytes += chunk.length;
+        if (totalBytes > MAX_DOWNLOAD_BYTES) {
+          res.destroy();
+          reject(new Error('Telegram photo exceeds maximum allowed download size'));
+        } else {
+          chunks.push(chunk);
+        }
+      });
+
+      res.on('end', () => resolve(Buffer.concat(chunks)));
+      res.on('error', reject);
+    });
+
+    req.setTimeout(DOWNLOAD_TIMEOUT_MS, () => {
+      req.destroy(new Error('Telegram photo download timed out'));
+    });
+
+    req.on('error', reject);
+  });
 }
 
 /**
@@ -313,25 +361,9 @@ export class TelegramChannel implements Channel {
         }
 
         const fileUrl = `https://api.telegram.org/file/bot${this.botToken}/${file.file_path}`;
-        const buffer = await new Promise<Buffer>((resolve, reject) => {
-          https.get(fileUrl, (res) => {
-            if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-              https.get(res.headers.location, (redir) => {
-                const chunks: Buffer[] = [];
-                redir.on('data', (chunk) => chunks.push(chunk));
-                redir.on('end', () => resolve(Buffer.concat(chunks)));
-                redir.on('error', reject);
-              }).on('error', reject);
-            } else {
-              const chunks: Buffer[] = [];
-              res.on('data', (chunk) => chunks.push(chunk));
-              res.on('end', () => resolve(Buffer.concat(chunks)));
-              res.on('error', reject);
-            }
-          }).on('error', reject);
-        });
+        const buffer = await downloadWithLimits(fileUrl);
 
-        const groupDir = path.join(GROUPS_DIR, group.folder);
+        const groupDir = resolveGroupFolderPath(group.folder);
         const processed = await processImage(buffer, groupDir, caption);
 
         if (processed) {

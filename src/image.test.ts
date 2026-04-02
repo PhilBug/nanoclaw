@@ -4,8 +4,7 @@ import path from 'path';
 import os from 'os';
 import { processImage, parseImageReferences } from './image.js';
 
-// Create a minimal 10x10 JPEG buffer for testing (won't be valid JPEG but sharp handles it)
-// We'll use a real minimal JPEG instead
+// Minimal valid JPEG buffer for testing (small 10x10 image)
 const MINIMAL_JPEG = Buffer.from(
   '/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/xAAUAQEAAAAAAAAAAAAAAAAAAAAA/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AKwA//9k=',
   'base64',
@@ -82,10 +81,33 @@ describe('parseImageReferences', () => {
 
   it('should handle multiple images in a single message', () => {
     const messages = [
-      { content: '[Image: attachments/img-1.jpg] and [Image: attachments/img-2.jpg]' },
+      { content: '[Image: attachments/img-1709345678-a1b2.jpg] and [Image: attachments/img-1709345679-c3d4.jpg]' },
     ];
 
     const refs = parseImageReferences(messages);
     expect(refs).toHaveLength(2);
+  });
+
+  it('should reject path traversal attempts', () => {
+    const messages = [
+      { content: '[Image: attachments/../../etc/passwd]' },
+      { content: '[Image: attachments/..\\..\\windows\\system32]' },
+      { content: '[Image: attachments/img-123.jpg] [Image: attachments/../secret]' },
+    ];
+
+    const refs = parseImageReferences(messages);
+    expect(refs).toHaveLength(0);
+  });
+
+  it('should accept only valid generated filenames', () => {
+    const messages = [
+      { content: '[Image: attachments/img-1234567890-abcd.jpg]' },   // valid
+      { content: '[Image: attachments/custom-name.png]' },            // invalid — wrong pattern
+      { content: '[Image: attachments/photo.jpg]' },                  // invalid — no timestamp
+    ];
+
+    const refs = parseImageReferences(messages);
+    expect(refs).toHaveLength(1);
+    expect(refs[0].relativePath).toBe('attachments/img-1234567890-abcd.jpg');
   });
 });

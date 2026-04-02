@@ -42,6 +42,8 @@ export async function processImage(
   return { content, relativePath };
 }
 
+const VALID_IMAGE_FILENAME = /^attachments\/img-\d+-[a-z0-9]+\.jpg$/;
+
 export function parseImageReferences(
   messages: Array<{ content: string }>,
 ): ImageAttachment[] {
@@ -50,7 +52,12 @@ export function parseImageReferences(
     let match: RegExpExecArray | null;
     IMAGE_REF_PATTERN.lastIndex = 0;
     while ((match = IMAGE_REF_PATTERN.exec(msg.content)) !== null) {
-      refs.push({ relativePath: match[1], mediaType: 'image/jpeg' });
+      const relativePath = match[1];
+      // Only accept paths that match our generated filename pattern — reject path traversal
+      if (!VALID_IMAGE_FILENAME.test(relativePath)) {
+        continue;
+      }
+      refs.push({ relativePath, mediaType: 'image/jpeg' });
     }
   }
   return refs;

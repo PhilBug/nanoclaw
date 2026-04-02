@@ -370,12 +370,36 @@ async function runQuery(
 
   // If there are image attachments, load them and send as multimodal content
   if (containerInput.imageAttachments && containerInput.imageAttachments.length > 0) {
+    const attachmentsBaseDir = path.resolve('/workspace/group');
+    const MAX_ATTACHMENTS = 10;
+    const MAX_BYTES_PER_FILE = 10 * 1024 * 1024; // 10 MB
+    const MAX_TOTAL_BYTES = 20 * 1024 * 1024; // 20 MB
     const blocks: ContentBlock[] = [];
-    for (const att of containerInput.imageAttachments) {
-      const imgPath = path.join('/workspace/group', att.relativePath);
+    let totalBytes = 0;
+    const attachments = containerInput.imageAttachments.slice(0, MAX_ATTACHMENTS);
+    if (containerInput.imageAttachments.length > MAX_ATTACHMENTS) {
+      log(`Trimmed image attachments from ${containerInput.imageAttachments.length} to ${MAX_ATTACHMENTS}`);
+    }
+    for (const att of attachments) {
+      const imgPath = path.resolve(attachmentsBaseDir, att.relativePath);
+      // Enforce containment within the attachments directory
+      if (!imgPath.startsWith(attachmentsBaseDir + path.sep) && imgPath !== attachmentsBaseDir) {
+        log(`Skipping image attachment with invalid path: ${att.relativePath}`);
+        continue;
+      }
       try {
         if (fs.existsSync(imgPath)) {
-          const data = fs.readFileSync(imgPath).toString('base64');
+          const fileBuffer = fs.readFileSync(imgPath);
+          if (fileBuffer.length > MAX_BYTES_PER_FILE) {
+            log(`Skipping image attachment exceeding ${MAX_BYTES_PER_FILE / 1024 / 1024}MB: ${att.relativePath}`);
+            continue;
+          }
+          totalBytes += fileBuffer.length;
+          if (totalBytes > MAX_TOTAL_BYTES) {
+            log(`Skipping image attachment: total size would exceed ${MAX_TOTAL_BYTES / 1024 / 1024}MB`);
+            break;
+          }
+          const data = fileBuffer.toString('base64');
           blocks.push({
             type: 'image',
             source: {

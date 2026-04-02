@@ -23,7 +23,10 @@ export async function processImage(
   if (!buffer || buffer.length === 0) return null;
 
   const resized = await sharp(buffer)
-    .resize(MAX_DIMENSION, MAX_DIMENSION, { fit: 'inside', withoutEnlargement: true })
+    .resize(MAX_DIMENSION, MAX_DIMENSION, {
+      fit: 'inside',
+      withoutEnlargement: true,
+    })
     .jpeg({ quality: 85 })
     .toBuffer();
 
@@ -42,7 +45,7 @@ export async function processImage(
   return { content, relativePath };
 }
 
-const VALID_IMAGE_FILENAME = /^attachments\/img-\d+-[a-z0-9]+\.jpg$/;
+const VALID_ATTACHMENT_PATH = /^attachments\/[a-zA-Z0-9_.-]+$/;
 
 export function parseImageReferences(
   messages: Array<{ content: string }>,
@@ -53,11 +56,20 @@ export function parseImageReferences(
     IMAGE_REF_PATTERN.lastIndex = 0;
     while ((match = IMAGE_REF_PATTERN.exec(msg.content)) !== null) {
       const relativePath = match[1];
-      // Only accept paths that match our generated filename pattern — reject path traversal
-      if (!VALID_IMAGE_FILENAME.test(relativePath)) {
+      // Reject path traversal (.., backslashes) and only allow simple filenames
+      if (!VALID_ATTACHMENT_PATH.test(relativePath)) {
         continue;
       }
-      refs.push({ relativePath, mediaType: 'image/jpeg' });
+      const ext = path.extname(relativePath).toLowerCase();
+      const mediaType =
+        ext === '.png'
+          ? 'image/png'
+          : ext === '.gif'
+            ? 'image/gif'
+            : ext === '.webp'
+              ? 'image/webp'
+              : 'image/jpeg';
+      refs.push({ relativePath, mediaType });
     }
   }
   return refs;

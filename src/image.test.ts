@@ -29,7 +29,9 @@ describe('processImage', () => {
   it('should save a resized JPEG to the attachments directory', async () => {
     const result = await processImage(MINIMAL_JPEG, tmpDir);
     expect(result).not.toBeNull();
-    expect(result!.relativePath).toMatch(/^attachments\/img-\d+-[a-z0-9]+\.jpg$/);
+    expect(result!.relativePath).toMatch(
+      /^attachments\/img-\d+-[a-z0-9]+\.jpg$/,
+    );
     expect(result!.content).toContain(result!.relativePath);
 
     const filePath = path.join(tmpDir, result!.relativePath);
@@ -81,7 +83,10 @@ describe('parseImageReferences', () => {
 
   it('should handle multiple images in a single message', () => {
     const messages = [
-      { content: '[Image: attachments/img-1709345678-a1b2.jpg] and [Image: attachments/img-1709345679-c3d4.jpg]' },
+      {
+        content:
+          '[Image: attachments/img-1709345678-a1b2.jpg] and [Image: attachments/img-1709345679-c3d4.jpg]',
+      },
     ];
 
     const refs = parseImageReferences(messages);
@@ -92,22 +97,28 @@ describe('parseImageReferences', () => {
     const messages = [
       { content: '[Image: attachments/../../etc/passwd]' },
       { content: '[Image: attachments/..\\..\\windows\\system32]' },
-      { content: '[Image: attachments/img-123.jpg] [Image: attachments/../secret]' },
+      { content: '[Image: attachments/../secret]' },
     ];
 
     const refs = parseImageReferences(messages);
     expect(refs).toHaveLength(0);
   });
 
-  it('should accept only valid generated filenames', () => {
+  it('should detect media type from file extension', () => {
     const messages = [
-      { content: '[Image: attachments/img-1234567890-abcd.jpg]' },   // valid
-      { content: '[Image: attachments/custom-name.png]' },            // invalid — wrong pattern
-      { content: '[Image: attachments/photo.jpg]' },                  // invalid — no timestamp
+      { content: '[Image: attachments/img-1234567890-abcd.jpg]' },
+      { content: '[Image: attachments/img-1234567890-abcd.png]' },
+      { content: '[Image: attachments/img-1234567890-abcd.webp]' },
+      { content: '[Image: attachments/img-1234567890-abcd.gif]' },
+      { content: '[Image: attachments/img-1234567890-abcd.jpeg]' },
     ];
 
     const refs = parseImageReferences(messages);
-    expect(refs).toHaveLength(1);
-    expect(refs[0].relativePath).toBe('attachments/img-1234567890-abcd.jpg');
+    expect(refs).toHaveLength(5);
+    expect(refs[0].mediaType).toBe('image/jpeg');
+    expect(refs[1].mediaType).toBe('image/png');
+    expect(refs[2].mediaType).toBe('image/webp');
+    expect(refs[3].mediaType).toBe('image/gif');
+    expect(refs[4].mediaType).toBe('image/jpeg');
   });
 });

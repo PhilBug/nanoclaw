@@ -13,6 +13,7 @@ import {
   TIMEZONE,
 } from './config.js';
 import { startCredentialProxy } from './credential-proxy.js';
+import { startHealthMonitor } from './health-monitor.js';
 import './channels/index.js';
 import {
   getChannelFactory,
@@ -735,6 +736,44 @@ async function main(): Promise<void> {
   });
   queue.setProcessMessagesFn(processGroupMessages);
   recoverPendingMessages();
+
+  // Start health monitor (proactive alerts for Docker, channels, queue)
+  startHealthMonitor({
+    channels: () => channels,
+    queue,
+    registeredGroups: () => registeredGroups,
+    sendMessage: async (jid, rawText) => {
+      const text = formatOutbound(rawText);
+      if (!text) return;
+
+      let channel = findChannel(channels, jid);
+
+      // If the owning channel is disconnected, treat as unavailable
+      if (channel && !channel.isConnected()) {
+        logger.warn(
+          { jid, channel: channel.name },
+          'Owning channel for health alert is disconnected; trying fallback',
+        );
+        channel = undefined;
+      }
+
+      if (!channel) {
+        // Fallback: try any connected channel that owns this JID
+        const fallback = channels.find(
+          (ch) => ch.isConnected() && ch.ownsJid(jid),
+        );
+        if (!fallback) {
+          logger.warn({ jid }, 'No connected channel for health alert');
+          return;
+        }
+        await fallback.sendMessage(jid, text);
+        return;
+      }
+
+      await channel.sendMessage(jid, text);
+    },
+  });
+
   startMessageLoop().catch((err) => {
     logger.fatal({ err }, 'Message loop crashed unexpectedly');
     process.exit(1);

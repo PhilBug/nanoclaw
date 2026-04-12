@@ -3,9 +3,20 @@ import path from 'path';
 
 import { CronExpressionParser } from 'cron-parser';
 
-import { DATA_DIR, IPC_POLL_INTERVAL, TIMEZONE } from './config.js';
+import {
+  DATA_DIR,
+  IPC_POLL_INTERVAL,
+  TIMEZONE,
+  CONTAINER_ALLOWLIST_PATH,
+} from './config.js';
 import { AvailableGroup } from './container-runner.js';
 import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
+import {
+  restartContainer,
+  getContainerLogs,
+  recreateContainer,
+  stopContainer,
+} from './container-runtime.js';
 import { isValidGroupFolder, resolveGroupFolderPath } from './group-folder.js';
 import { logger } from './logger.js';
 import { RegisteredGroup } from './types.js';
@@ -196,6 +207,25 @@ export function startIpcWatcher(deps: IpcDeps): void {
   logger.info('IPC watcher started (per-group namespaces)');
 }
 
+function writeContainerResponse(
+  sourceGroup: string,
+  requestId: string,
+  response: {
+    requestId: string;
+    status: string;
+    result?: string;
+    error?: string;
+  },
+): void {
+  const ipcBaseDir = path.join(DATA_DIR, 'ipc');
+  const responsesDir = path.join(ipcBaseDir, sourceGroup, 'responses');
+  fs.mkdirSync(responsesDir, { recursive: true });
+  const responsePath = path.join(responsesDir, `${requestId}.json`);
+  const tempPath = `${responsePath}.tmp`;
+  fs.writeFileSync(tempPath, JSON.stringify(response, null, 2));
+  fs.renameSync(tempPath, responsePath);
+}
+
 export async function processTaskIpc(
   data: {
     type: string;
@@ -215,6 +245,11 @@ export async function processTaskIpc(
     trigger?: string;
     requiresTrigger?: boolean;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For container_cmd
+    requestId?: string;
+    container?: string;
+    action?: string;
+    params?: { lines?: number };
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -503,6 +538,109 @@ export async function processTaskIpc(
         );
       }
       break;
+
+    case 'container_cmd': {
+      // Main-group only
+      if (!isMain) {
+        logger.warn(
+          { sourceGroup },
+          'Unauthorized container_cmd blocked (non-main group)',
+        );
+        break;
+      }
+      if (!data.requestId || !data.container || !data.action) {
+        logger.warn({ data }, 'Invalid container_cmd request - missing fields');
+        break;
+      }
+
+      const validActions = ['restart', 'stop', 'recreate', 'logs'];
+      if (!validActions.includes(data.action)) {
+        logger.warn({ action: data.action }, 'Invalid container_cmd action');
+        writeContainerResponse(sourceGroup, data.requestId, {
+          requestId: data.requestId,
+          status: 'error',
+          error: `Invalid action: ${data.action}. Must be one of: ${validActions.join(', ')}`,
+        });
+        break;
+      }
+
+      // Read allowlist
+      let allowlist: Record<string, { composeFile?: string; service?: string }>;
+      try {
+        const raw = fs.readFileSync(CONTAINER_ALLOWLIST_PATH, 'utf-8');
+        allowlist = JSON.parse(raw);
+      } catch {
+        logger.error('Failed to read container allowlist');
+        writeContainerResponse(sourceGroup, data.requestId, {
+          requestId: data.requestId,
+          status: 'error',
+          error: 'Container allowlist not configured',
+        });
+        break;
+      }
+
+      const entry = allowlist[data.container];
+      if (!entry) {
+        logger.warn(
+          { container: data.container },
+          'Container not in allowlist',
+        );
+        writeContainerResponse(sourceGroup, data.requestId, {
+          requestId: data.requestId,
+          status: 'error',
+          error: `Container "${data.container}" is not in the allowlist`,
+        });
+        break;
+      }
+
+      try {
+        let result: string;
+        switch (data.action) {
+          case 'restart':
+            restartContainer(data.container);
+            result = `Container ${data.container} restarted`;
+            break;
+          case 'stop':
+            stopContainer(data.container);
+            result = `Container ${data.container} stopped`;
+            break;
+          case 'recreate':
+            if (!entry.composeFile || !entry.service) {
+              throw new Error(
+                `Container "${data.container}" missing composeFile/service in allowlist`,
+              );
+            }
+            recreateContainer(data.container, entry.composeFile, entry.service);
+            result = `Container ${data.container} recreated`;
+            break;
+          case 'logs':
+            result = getContainerLogs(data.container, data.params?.lines);
+            break;
+          default:
+            throw new Error(`Unhandled action: ${data.action}`);
+        }
+        logger.info(
+          { container: data.container, action: data.action },
+          'Container command executed',
+        );
+        writeContainerResponse(sourceGroup, data.requestId, {
+          requestId: data.requestId,
+          status: 'success',
+          result,
+        });
+      } catch (err) {
+        logger.error(
+          { container: data.container, action: data.action, err },
+          'Container command failed',
+        );
+        writeContainerResponse(sourceGroup, data.requestId, {
+          requestId: data.requestId,
+          status: 'error',
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      break;
+    }
 
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');

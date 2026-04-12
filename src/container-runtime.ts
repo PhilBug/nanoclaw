@@ -57,12 +57,48 @@ export function readonlyMountArgs(
   return ['-v', `${hostPath}:${containerPath}:ro`];
 }
 
-/** Stop a container by name. Uses execFileSync to avoid shell injection. */
-export function stopContainer(name: string): void {
+/** Validate a container name to prevent shell injection. */
+function validateContainerName(name: string): void {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(name)) {
     throw new Error(`Invalid container name: ${name}`);
   }
+}
+
+/** Stop a container by name. */
+export function stopContainer(name: string): void {
+  validateContainerName(name);
   execSync(`${CONTAINER_RUNTIME_BIN} stop -t 1 ${name}`, { stdio: 'pipe' });
+}
+
+/** Restart a container by name. */
+export function restartContainer(name: string): void {
+  validateContainerName(name);
+  execSync(`${CONTAINER_RUNTIME_BIN} restart ${name}`, { stdio: 'pipe' });
+}
+
+/** Get container logs. Returns stdout+stderr combined. */
+export function getContainerLogs(name: string, lines = 100): string {
+  validateContainerName(name);
+  return execSync(`${CONTAINER_RUNTIME_BIN} logs --tail ${lines} ${name}`, {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    encoding: 'utf-8',
+  });
+}
+
+/** Recreate a container using docker compose. */
+export function recreateContainer(
+  name: string,
+  composeFile: string,
+  service: string,
+): void {
+  validateContainerName(name);
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(service)) {
+    throw new Error(`Invalid service name: ${service}`);
+  }
+  execSync(
+    `${CONTAINER_RUNTIME_BIN} compose -f ${composeFile} up -d --force-recreate ${service}`,
+    { stdio: 'pipe' },
+  );
 }
 
 /** Ensure the container runtime is running, starting it if needed. */

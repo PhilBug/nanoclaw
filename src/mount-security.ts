@@ -30,7 +30,6 @@ const DEFAULT_BLOCKED_PATTERNS = [
   '.kube',
   '.docker',
   'credentials',
-  '.env',
   '.netrc',
   '.npmrc',
   '.pypirc',

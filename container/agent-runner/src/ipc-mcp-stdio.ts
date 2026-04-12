@@ -14,6 +14,7 @@ import { CronExpressionParser } from 'cron-parser';
 const IPC_DIR = '/workspace/ipc';
 const MESSAGES_DIR = path.join(IPC_DIR, 'messages');
 const TASKS_DIR = path.join(IPC_DIR, 'tasks');
+const RESPONSES_DIR = path.join(IPC_DIR, 'responses');
 
 // Context from environment variables (set by the agent runner)
 const chatJid = process.env.NANOCLAW_CHAT_JID!;
@@ -529,6 +530,84 @@ Use available_groups.json to find the JID for a group. The folder name must be c
           text: `Group "${args.name}" registered. It will start receiving messages immediately.`,
         },
       ],
+    };
+  },
+);
+
+server.tool(
+  'container_cmd',
+  'Manage whitelisted external Docker containers. Main group only. Available actions: restart, stop, recreate, logs.',
+  {
+    container: z.string().describe('Container name (must be in the allowlist)'),
+    action: z.enum(['restart', 'stop', 'recreate', 'logs']).describe('Docker operation to perform'),
+    lines: z.number().optional().describe('Number of log lines to fetch (logs action only, default 100)'),
+  },
+  async (args) => {
+    if (!isMain) {
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: 'Only the main group can manage external containers.',
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    const data = {
+      type: 'container_cmd',
+      requestId,
+      container: args.container,
+      action: args.action,
+      params: args.lines ? { lines: args.lines } : undefined,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(TASKS_DIR, data);
+
+    // Poll for response with 30s timeout (500ms interval)
+    const timeout = 30000;
+    const interval = 500;
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < timeout) {
+      const responsePath = path.join(RESPONSES_DIR, `${requestId}.json`);
+      if (fs.existsSync(responsePath)) {
+        try {
+          const response = JSON.parse(fs.readFileSync(responsePath, 'utf-8'));
+          fs.unlinkSync(responsePath);
+          if (response.status === 'error') {
+            return {
+              content: [{ type: 'text' as const, text: `Error: ${response.error}` }],
+              isError: true,
+            };
+          }
+          return {
+            content: [{ type: 'text' as const, text: response.result }],
+          };
+        } catch (err) {
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: `Error reading response: ${err instanceof Error ? err.message : String(err)}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, interval));
+    }
+
+    return {
+      content: [
+        { type: 'text' as const, text: `Timeout waiting for container_cmd response (${timeout}ms)` },
+      ],
+      isError: true,
     };
   },
 );

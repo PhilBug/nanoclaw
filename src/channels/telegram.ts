@@ -38,7 +38,9 @@ function downloadWithLimits(url: string): Promise<Buffer> {
       // Reject on HTTP error status codes
       if (status >= 400) {
         res.resume();
-        reject(new Error(`Telegram photo download failed with status ${status}`));
+        reject(
+          new Error(`Telegram photo download failed with status ${status}`),
+        );
         return;
       }
 
@@ -56,7 +58,9 @@ function downloadWithLimits(url: string): Promise<Buffer> {
         totalBytes += chunk.length;
         if (totalBytes > MAX_DOWNLOAD_BYTES) {
           res.destroy();
-          reject(new Error('Telegram photo exceeds maximum allowed download size'));
+          reject(
+            new Error('Telegram photo exceeds maximum allowed download size'),
+          );
         } else {
           chunks.push(chunk);
         }
@@ -367,7 +371,10 @@ export class TelegramChannel implements Channel {
         const processed = await processImage(buffer, groupDir, caption);
 
         if (processed) {
-          logger.info({ chatJid, path: processed.relativePath }, 'Processed Telegram photo');
+          logger.info(
+            { chatJid, path: processed.relativePath },
+            'Processed Telegram photo',
+          );
           this.opts.onMessage(chatJid, {
             id: ctx.message.message_id.toString(),
             chat_jid: chatJid,

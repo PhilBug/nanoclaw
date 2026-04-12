@@ -51,11 +51,14 @@ export interface NewMessage {
   timestamp: string;
   is_from_me?: boolean;
   is_bot_message?: boolean;
-  // Reply metadata fields
+  thread_id?: string;
+  reply_to_message_id?: string | null;
+  reply_to_message_content?: string;
+  reply_to_sender_name?: string;
+  // Reply tracking fields
   is_reply?: boolean;
   is_reply_to_assistant?: boolean;
   reply_to_username?: string | null;
-  reply_to_message_id?: string | null;
 }
 
 export interface ScheduledTask {

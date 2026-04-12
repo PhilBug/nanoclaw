@@ -252,8 +252,8 @@ function buildVolumeMounts(
       readonly: true,
     });
 
-    // .env shadowing is handled inside the container entrypoint via mount --bind
-    // (Apple Container only supports directory mounts, not file mounts like /dev/null)
+    // .env shadowing is handled via Docker file-level bind mount
+    // (-v /dev/null:/workspace/project/.env:ro) added in buildContainerArgs.
 
     // Main gets writable access to the store (SQLite DB) so it can
     // query and write to the database directly.

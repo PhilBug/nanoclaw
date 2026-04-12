@@ -123,14 +123,12 @@ describe('credential-proxy', () => {
     );
   });
 
-  it('OAuth mode injects x-api-key for APIs that prefer it', async () => {
+  it('OAuth mode does not inject Authorization when container omits it', async () => {
     proxyPort = await startProxy({
       CLAUDE_CODE_OAUTH_TOKEN: 'real-oauth-token',
     });
 
-    // Post-exchange: container sends x-api-key (temp key from exchange)
-    // Proxy replaces it with the real OAuth token for compatibility with
-    // APIs that expect x-api-key even in OAuth mode
+    // Post-exchange: container uses x-api-key only, no Authorization header
     await makeRequest(
       proxyPort,
       {
@@ -144,7 +142,7 @@ describe('credential-proxy', () => {
       '{}',
     );
 
-    expect(lastUpstreamHeaders['x-api-key']).toBe('real-oauth-token');
+    expect(lastUpstreamHeaders['x-api-key']).toBe('temp-key-from-exchange');
     expect(lastUpstreamHeaders['authorization']).toBeUndefined();
   });
 

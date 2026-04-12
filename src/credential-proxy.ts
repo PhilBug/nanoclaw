@@ -67,8 +67,10 @@ export function startCredentialProxy(
           delete headers['x-api-key'];
           headers['x-api-key'] = secrets.ANTHROPIC_API_KEY;
         } else {
-          // OAuth mode: replace placeholder token with real one
-          // Handle both Authorization header and x-api-key header
+          // OAuth mode: replace placeholder Bearer token with the real one
+          // only when the container actually sends an Authorization header
+          // (exchange request + auth probes). Post-exchange requests use
+          // x-api-key only, so they pass through without token injection.
           if (headers['authorization']) {
             delete headers['authorization'];
             if (oauthToken) {

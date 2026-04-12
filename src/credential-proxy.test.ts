@@ -142,7 +142,7 @@ describe('credential-proxy', () => {
       '{}',
     );
 
-    expect(lastUpstreamHeaders['x-api-key']).toBe('temp-key-from-exchange');
+    expect(lastUpstreamHeaders['x-api-key']).toBe('real-oauth-token');
     expect(lastUpstreamHeaders['authorization']).toBeUndefined();
   });
 

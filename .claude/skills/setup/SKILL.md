@@ -142,9 +142,12 @@ Run `npx tsx setup/index.ts --step container -- --runtime <chosen>` and parse th
 
 If HAS_ENV=true from step 2, read `.env` and check for `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`. If present, confirm with user: keep or reconfigure?
 
-AskUserQuestion: Claude subscription (Pro/Max) vs Anthropic API key?
+Check if a secret already exists:
+```bash
+onecli secrets list
+```
 
-**Subscription:** Tell user to run `claude setup-token` in another terminal, copy the token, add `CLAUDE_CODE_OAUTH_TOKEN=<token>` to `.env`. Do NOT collect the token in chat.
+If an Anthropic secret is listed, confirm with user: keep or reconfigure? If keeping, skip to step 5.
 
 **API key:** Tell user to add `ANTHROPIC_API_KEY=<key>` to `.env`.
 

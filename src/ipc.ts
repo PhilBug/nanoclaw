@@ -14,6 +14,8 @@ import { createTask, deleteTask, getTaskById, updateTask } from './db.js';
 import {
   restartContainer,
   getContainerLogs,
+  getContainerStats,
+  getContainerTop,
   recreateContainer,
   stopContainer,
 } from './container-runtime.js';
@@ -553,7 +555,7 @@ export async function processTaskIpc(
         break;
       }
 
-      const validActions = ['restart', 'stop', 'recreate', 'logs'];
+      const validActions = ['restart', 'stop', 'recreate', 'logs', 'stats', 'top'];
       if (!validActions.includes(data.action)) {
         logger.warn({ action: data.action }, 'Invalid container_cmd action');
         writeContainerResponse(sourceGroup, data.requestId, {
@@ -615,6 +617,12 @@ export async function processTaskIpc(
             break;
           case 'logs':
             result = getContainerLogs(data.container, data.params?.lines);
+            break;
+          case 'stats':
+            result = getContainerStats(data.container);
+            break;
+          case 'top':
+            result = getContainerTop(data.container);
             break;
           default:
             throw new Error(`Unhandled action: ${data.action}`);

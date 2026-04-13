@@ -536,10 +536,10 @@ Use available_groups.json to find the JID for a group. The folder name must be c
 
 server.tool(
   'container_cmd',
-  'Manage whitelisted external Docker containers. Main group only. Available actions: restart, stop, recreate, logs.',
+  'Manage whitelisted external Docker containers. Main group only. Available actions: restart, stop, recreate, logs, stats, top.',
   {
     container: z.string().describe('Container name (must be in the allowlist)'),
-    action: z.enum(['restart', 'stop', 'recreate', 'logs']).describe('Docker operation to perform'),
+    action: z.enum(['restart', 'stop', 'recreate', 'logs', 'stats', 'top']).describe('Docker operation to perform'),
     lines: z.number().optional().describe('Number of log lines to fetch (logs action only, default 100)'),
   },
   async (args) => {

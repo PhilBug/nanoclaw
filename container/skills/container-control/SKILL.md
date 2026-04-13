@@ -1,6 +1,6 @@
 ---
 name: container-control
-description: Manage whitelisted external Docker containers (restart, stop, recreate, logs). Main group only.
+description: Manage whitelisted external Docker containers (restart, stop, recreate, logs, stats, top). Main group only.
 allowed-tools: Bash(mcp__nanoclaw__container_cmd *)
 ---
 
@@ -16,6 +16,8 @@ Manage external Docker containers from the main group. Containers must be listed
 | `stop` | Stop a container | — |
 | `recreate` | Recreate from compose file (requires composeFile/service in allowlist) | — |
 | `logs` | Fetch container logs | `lines` (optional, default 100) |
+| `stats` | Resource usage (CPU, RAM, Net I/O, Block I/O, PIDs) | — |
+| `top` | Processes running inside the container | — |
 
 ## Usage
 
@@ -26,6 +28,8 @@ mcp__nanoclaw__container_cmd(container="traszka-search", action="restart")
 mcp__nanoclaw__container_cmd(container="traszka-search", action="logs", lines=50)
 mcp__nanoclaw__container_cmd(container="traszka-search", action="stop")
 mcp__nanoclaw__container_cmd(container="traszka-search", action="recreate")
+mcp__nanoclaw__container_cmd(container="traszka-search", action="stats")
+mcp__nanoclaw__container_cmd(container="traszka-search", action="top")
 ```
 
 ## Allowlist
@@ -47,5 +51,5 @@ Only containers listed in `~/.config/nanoclaw/container-allowlist.json` can be m
 ## Restrictions
 
 - Main group only — non-main groups receive an access denied error.
-- Only the four actions listed above are supported.
+- Only the six actions listed above are supported.
 - Container names are validated against a strict regex (`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`).

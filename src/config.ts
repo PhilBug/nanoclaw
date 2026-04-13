@@ -113,3 +113,37 @@ function resolveConfigTimezone(): string {
   return 'UTC';
 }
 export const TIMEZONE = resolveConfigTimezone();
+
+// --- Health Monitor ---
+export const HEALTH_CHECK_INTERVAL = parseInt(
+  process.env.HEALTH_CHECK_INTERVAL || '30000',
+  10,
+); // 30 seconds
+export const HEALTH_DOCKER_TIMEOUT = parseInt(
+  process.env.HEALTH_DOCKER_TIMEOUT || '5000',
+  10,
+); // 5 seconds
+export const HEALTH_ALERT_COOLDOWN_DOCKER = parseInt(
+  process.env.HEALTH_ALERT_COOLDOWN_DOCKER || '300000',
+  10,
+); // 5 minutes
+export const HEALTH_ALERT_COOLDOWN_CHANNEL = parseInt(
+  process.env.HEALTH_ALERT_COOLDOWN_CHANNEL || '900000',
+  10,
+); // 15 minutes
+export const HEALTH_ALERT_COOLDOWN_QUEUE = parseInt(
+  process.env.HEALTH_ALERT_COOLDOWN_QUEUE || '900000',
+  10,
+); // 15 minutes
+export const HEALTH_ERROR_WINDOW_MS = parseInt(
+  process.env.HEALTH_ERROR_WINDOW_MS || '1800000',
+  10,
+); // 30 minutes
+export const HEALTH_CONTAINER_ERROR_THRESHOLD = parseInt(
+  process.env.HEALTH_CONTAINER_ERROR_THRESHOLD || '5',
+  10,
+);
+export const HEALTH_QUEUE_BACKLOG_THRESHOLD = parseInt(
+  process.env.HEALTH_QUEUE_BACKLOG_THRESHOLD || '3',
+  10,
+);

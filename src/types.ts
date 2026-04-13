@@ -116,3 +116,20 @@ export type OnChatMetadata = (
   channel?: string,
   isGroup?: boolean,
 ) => void;
+
+// --- Health Monitor ---
+
+export interface HealthStatus {
+  timestamp: string;
+  docker: { ok: boolean; latencyMs: number; consecutiveFailures: number };
+  channels: Array<{ name: string; connected: boolean }>;
+  queue: { activeCount: number; waitingCount: number; groupCount: number };
+  containerErrors: { recentErrors: number };
+  uptime: number; // process.uptime() in seconds
+}
+
+export interface HealthCheckResult {
+  check: string;
+  severity: 'critical' | 'warning' | 'info';
+  message: string;
+}

@@ -42,8 +42,8 @@ RUN GH_VER="${GH_CLI_VERSION#v}" \
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
-# Install agent-browser, Tavily CLI, and claude-code globally
-RUN npm install -g agent-browser @anthropic-ai/claude-code \
+# Install agent-browser, Tavily CLI, claude-code, and QMD globally
+RUN npm install -g agent-browser @anthropic-ai/claude-code @tobilu/qmd \
     && python3 -m pip install --break-system-packages --no-cache-dir tavily-cli
 
 # Create app directory

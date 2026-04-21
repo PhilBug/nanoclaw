@@ -85,6 +85,24 @@ export function getContainerLogs(name: string, lines = 100): string {
   });
 }
 
+/** Get container resource usage stats. Returns parsed `docker stats --no-stream` output. */
+export function getContainerStats(name: string): string {
+  validateContainerName(name);
+  return execSync(
+    `${CONTAINER_RUNTIME_BIN} stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}\t{{.NetIO}}\t{{.BlockIO}}\t{{.PIDs}}" ${name}`,
+    { stdio: ['pipe', 'pipe', 'pipe'], encoding: 'utf-8' },
+  );
+}
+
+/** Get processes running inside a container. Returns `docker top` output. */
+export function getContainerTop(name: string): string {
+  validateContainerName(name);
+  return execSync(`${CONTAINER_RUNTIME_BIN} top ${name}`, {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    encoding: 'utf-8',
+  });
+}
+
 /** Recreate a container using docker compose. */
 export function recreateContainer(
   name: string,

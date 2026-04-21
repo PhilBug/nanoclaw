@@ -13,6 +13,7 @@ const envConfig = readEnvFile([
   'ANTHROPIC_BASE_URL',
   'OLLAMA_ADMIN_TOOLS',
   'ONECLI_URL',
+  'ONECLI_API_KEY',
   'TZ',
 ]);
 
@@ -71,6 +72,8 @@ export const ANTHROPIC_BASE_URL =
   process.env.ANTHROPIC_BASE_URL || envConfig.ANTHROPIC_BASE_URL;
 export const ONECLI_URL =
   process.env.ONECLI_URL || envConfig.ONECLI_URL || 'http://localhost:10254';
+export const ONECLI_API_KEY =
+  process.env.ONECLI_API_KEY || envConfig.ONECLI_API_KEY;
 export const MAX_MESSAGES_PER_PROMPT = Math.max(
   1,
   parseInt(process.env.MAX_MESSAGES_PER_PROMPT || '10', 10) || 10,

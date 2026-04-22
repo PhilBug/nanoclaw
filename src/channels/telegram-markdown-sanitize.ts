@@ -28,6 +28,11 @@ export function sanitizeTelegramLegacyMarkdown(input: string): string {
   // as prose.
   text = text.replace(/^(\s*)[-+]\s+/gm, '$1• ');
 
+  // Flatten Markdown horizontal rules (bare --- / *** / ___ lines) to a
+  // plain Unicode divider. The parser doesn't understand HR syntax and the
+  // `*` / `_` characters would otherwise unbalance the delimiter counts below.
+  text = text.replace(/^[ \t]*[-_*]{3,}[ \t]*$/gm, '⎯⎯⎯');
+
   text = text.replace(/\*\*([^*\n]+?)\*\*/g, '*$1*');
   text = text.replace(/__([^_\n]+?)__/g, '_$1_');
 

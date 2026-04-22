@@ -65,4 +65,16 @@ describe('sanitizeTelegramLegacyMarkdown', () => {
   it('preserves indented list structure', () => {
     expect(sanitizeTelegramLegacyMarkdown('  - nested')).toBe('  • nested');
   });
+
+  it('flattens Markdown horizontal rules (---, ***, ___)', () => {
+    const input = 'before\n---\n***\n___\nafter';
+    expect(sanitizeTelegramLegacyMarkdown(input)).toBe(
+      'before\n⎯⎯⎯\n⎯⎯⎯\n⎯⎯⎯\nafter',
+    );
+  });
+
+  it('leaves horizontal rules inside code blocks alone', () => {
+    const input = '```\n---\n```';
+    expect(sanitizeTelegramLegacyMarkdown(input)).toBe(input);
+  });
 });

@@ -18,11 +18,24 @@ import { readEnvFile } from '../env.js';
 import { registerProviderContainerConfig } from './provider-container-registry.js';
 
 registerProviderContainerConfig('claude', () => {
-  const dotenv = readEnvFile(['ANTHROPIC_BASE_URL']);
+  const dotenv = readEnvFile([
+    'ANTHROPIC_BASE_URL',
+    'ANTHROPIC_API_KEY',
+    'GH_TOKEN',
+    'TAVILY_API_KEY',
+    'OPENROUTER_API_KEY',
+    'CONTEXT7_API_KEY',
+    'POLLINATIONS_API_KEY',
+  ]);
   const env: Record<string, string> = {};
   if (dotenv.ANTHROPIC_BASE_URL) {
     env.ANTHROPIC_BASE_URL = dotenv.ANTHROPIC_BASE_URL;
-    env.ANTHROPIC_AUTH_TOKEN = 'placeholder';
+    env.ANTHROPIC_AUTH_TOKEN = dotenv.ANTHROPIC_API_KEY || 'placeholder';
   }
+  if (dotenv.GH_TOKEN) env.GH_TOKEN = dotenv.GH_TOKEN;
+  if (dotenv.TAVILY_API_KEY) env.TAVILY_API_KEY = dotenv.TAVILY_API_KEY;
+  if (dotenv.OPENROUTER_API_KEY) env.OPENROUTER_API_KEY = dotenv.OPENROUTER_API_KEY;
+  if (dotenv.CONTEXT7_API_KEY) env.CONTEXT7_API_KEY = dotenv.CONTEXT7_API_KEY;
+  if (dotenv.POLLINATIONS_API_KEY) env.POLLINATIONS_API_KEY = dotenv.POLLINATIONS_API_KEY;
   return { env };
 });

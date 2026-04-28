@@ -1,5 +1,5 @@
 import { registerProvider } from './provider-registry.js';
-import type { AgentProvider, AgentQuery, ProviderEvent, ProviderOptions, QueryInput } from './types.js';
+import type { AgentProvider, AgentQuery, ContentBlock, ProviderEvent, ProviderOptions, QueryInput } from './types.js';
 
 /**
  * Mock provider for testing. Returns canned responses.
@@ -57,8 +57,8 @@ export class MockProvider implements AgentProvider {
     };
 
     return {
-      push(message: string) {
-        pending.push(message);
+      push(message: string | ContentBlock[]) {
+        pending.push(typeof message === 'string' ? message : '[content blocks]');
         waiting?.();
       },
       end() {

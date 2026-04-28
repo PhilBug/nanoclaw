@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { query as sdkQuery, type HookCallback, type PreCompactHookInput } from '@anthropic-ai/claude-agent-sdk';
+import type { MessageParam } from '@anthropic-ai/sdk/resources/index.js';
 
 import { clearContainerToolInFlight, setContainerToolInFlight } from '../db/connection.js';
 import { registerProvider } from './provider-registry.js';
@@ -59,8 +60,8 @@ const TOOL_ALLOWLIST = [
 
 interface SDKUserMessage {
   type: 'user';
-  message: { role: 'user'; content: string };
-  parent_tool_use_id: null;
+  message: MessageParam;
+  parent_tool_use_id: string | null;
   session_id: string;
 }
 
@@ -72,7 +73,7 @@ class MessageStream {
   private waiting: (() => void) | null = null;
   private done = false;
 
-  push(text: string): void {
+  push(text: MessageParam['content']): void {
     this.queue.push({
       type: 'user',
       message: { role: 'user', content: text },
@@ -261,7 +262,15 @@ export class ClaudeProvider implements AgentProvider {
 
   query(input: QueryInput): AgentQuery {
     const stream = new MessageStream();
-    stream.push(input.prompt);
+    if (input.imageBlocks && input.imageBlocks.length > 0) {
+      const content = [
+        { type: 'text' as const, text: input.prompt },
+        ...input.imageBlocks,
+      ] as MessageParam['content'];
+      stream.push(content);
+    } else {
+      stream.push(input.prompt);
+    }
 
     const instructions = input.systemContext?.instructions;
 
@@ -322,7 +331,7 @@ export class ClaudeProvider implements AgentProvider {
     }
 
     return {
-      push: (msg) => stream.push(msg),
+      push: (msg) => stream.push(typeof msg === 'string' ? msg : (msg as MessageParam['content'])),
       end: () => stream.end(),
       events: translateEvents(),
       abort: () => {

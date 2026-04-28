@@ -23,6 +23,7 @@ ARG CLAUDE_CODE_VERSION=2.1.116
 ARG AGENT_BROWSER_VERSION=latest
 ARG VERCEL_VERSION=latest
 ARG BUN_VERSION=1.3.12
+ARG GH_CLI_VERSION=v2.89.0
 
 # ---- System dependencies -----------------------------------------------------
 # tini: correct PID 1 / signal forwarding so outbound.db writes finalize on
@@ -49,6 +50,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         ca-certificates \
         curl \
         git \
+        jq \
+        python3 \
+        python3-pip \
         tini \
         unzip \
     && if [ "$INSTALL_CJK_FONTS" = "true" ]; then \
@@ -103,6 +107,23 @@ RUN --mount=type=cache,target=/root/.cache/pnpm \
 
 RUN --mount=type=cache,target=/root/.cache/pnpm \
     pnpm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+
+# ---- Custom tools --------------------------------------------------------------
+# GitHub CLI for PR operations
+ARG TARGETARCH
+RUN GH_VER="${GH_CLI_VERSION#v}" \
+    && curl -fsSL "https://github.com/cli/cli/releases/download/${GH_CLI_VERSION}/gh_${GH_VER}_linux_${TARGETARCH}.tar.gz" \
+    | tar xz -C /tmp \
+    && cp /tmp/gh_${GH_VER}_linux_${TARGETARCH}/bin/gh /usr/local/bin/gh \
+    && rm -rf /tmp/gh_${GH_VER}_linux_${TARGETARCH} \
+    && gh --version
+
+# Tavily CLI for web search
+RUN python3 -m pip install --break-system-packages --no-cache-dir tavily-cli
+
+# QMD tool
+RUN --mount=type=cache,target=/root/.cache/pnpm \
+    pnpm install -g "@tobilu/qmd"
 
 # ---- Entrypoint --------------------------------------------------------------
 COPY entrypoint.sh /app/entrypoint.sh

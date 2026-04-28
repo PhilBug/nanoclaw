@@ -7,7 +7,7 @@ import {
   migrateLegacyContinuation,
   setContinuation,
 } from './db/session-state.js';
-import { formatMessages, extractRouting, categorizeMessage, isClearCommand, stripInternalTags, type RoutingContext } from './formatter.js';
+import { formatMessages, extractRouting, categorizeMessage, isClearCommand, stripInternalTags, extractImageBlocks, type RoutingContext } from './formatter.js';
 import type { AgentProvider, AgentQuery, ProviderEvent } from './providers/types.js';
 
 const POLL_INTERVAL_MS = 1000;
@@ -157,11 +157,13 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     // Format messages: passthrough commands get raw text (only if the
     // provider natively handles slash commands), others get XML.
     const prompt = formatMessagesWithCommands(keep, config.provider.supportsNativeSlashCommands);
+    const imageBlocks = extractImageBlocks(keep);
 
     log(`Processing ${keep.length} message(s), kinds: ${[...new Set(keep.map((m) => m.kind))].join(',')}`);
 
     const query = config.provider.query({
       prompt,
+      imageBlocks: imageBlocks.length > 0 ? imageBlocks : undefined,
       continuation,
       cwd: config.cwd,
       systemContext: config.systemContext,

@@ -1,5 +1,7 @@
+import fs from 'fs';
 import { findByRouting } from './destinations.js';
 import type { MessageInRow } from './db/messages-in.js';
+import type { ContentBlock } from './providers/types.js';
 import { TIMEZONE, formatLocalTime } from './timezone.js';
 
 /**
@@ -255,4 +257,45 @@ function escapeXml(str: string): string {
  */
 export function stripInternalTags(text: string): string {
   return text.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
+}
+
+const IMAGE_MIME_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+]);
+
+/**
+ * Extract image content blocks from message attachments.
+ * Reads image files from the session inbox and base64-encodes them
+ * for Claude's multimodal API.
+ */
+export function extractImageBlocks(messages: MessageInRow[]): ContentBlock[] {
+  const blocks: ContentBlock[] = [];
+  for (const msg of messages) {
+    if (msg.kind !== 'chat' && msg.kind !== 'chat-sdk') continue;
+    const content = parseContent(msg.content);
+    const attachments = content.attachments;
+    if (!Array.isArray(attachments)) continue;
+    for (const att of attachments) {
+      const mimeType = att.mimeType || '';
+      if (!IMAGE_MIME_TYPES.has(mimeType)) continue;
+      const localPath = att.localPath;
+      if (!localPath) continue;
+      const fullPath = `/workspace/${localPath}`;
+      try {
+        const buf = fs.readFileSync(fullPath);
+        if (buf.length === 0) continue;
+        const base64 = buf.toString('base64');
+        blocks.push({
+          type: 'image',
+          source: { type: 'base64', media_type: mimeType, data: base64 },
+        });
+      } catch {
+        // File may have been cleaned up — skip silently
+      }
+    }
+  }
+  return blocks;
 }

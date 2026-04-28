@@ -27,9 +27,16 @@ export interface ProviderOptions {
   additionalDirectories?: string[];
 }
 
+export type ContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
+
 export interface QueryInput {
   /** Initial prompt (already formatted by agent-runner). */
   prompt: string;
+
+  /** Image content blocks extracted from message attachments. */
+  imageBlocks?: ContentBlock[];
 
   /**
    * Opaque continuation token from a previous query. The provider decides
@@ -57,7 +64,7 @@ export interface McpServerConfig {
 
 export interface AgentQuery {
   /** Push a follow-up message into the active query. */
-  push(message: string): void;
+  push(message: string | ContentBlock[]): void;
 
   /** Signal that no more input will be sent. */
   end(): void;

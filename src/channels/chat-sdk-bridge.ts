@@ -37,6 +37,8 @@ interface GatewayAdapter extends Adapter {
 export interface ReplyContext {
   text: string;
   sender: string;
+  /** True when the replied-to message was sent by the bot itself. */
+  fromBot?: boolean;
 }
 
 /** Extract reply context from a platform-specific raw message. Return null if no reply. */

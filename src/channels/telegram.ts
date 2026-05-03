@@ -45,6 +45,7 @@ function extractReplyContext(raw: Record<string, any>): ReplyContext | null {
   return {
     text: reply.text || reply.caption || '',
     sender: reply.from?.first_name || reply.from?.username || 'Unknown',
+    fromBot: reply.from?.is_bot === true,
   };
 }
 
@@ -195,6 +196,25 @@ function createPairingInterceptor(
   };
 }
 
+/**
+ * Interceptor that treats replies to the bot's own messages as mentions in
+ * group chats. Telegram users naturally use "Reply" to address the bot
+ * without @mentioning it — this makes that trigger the agent the same way.
+ */
+function createReplyToBotMentionInterceptor(
+  hostOnInbound: ChannelSetup['onInbound'],
+): ChannelSetup['onInbound'] {
+  return async (platformId, threadId, message) => {
+    if (!message.isMention && message.isGroup && message.kind === 'chat-sdk') {
+      const content = message.content as Record<string, any> | null;
+      if (content?.replyTo?.fromBot) {
+        message = { ...message, isMention: true };
+      }
+    }
+    hostOnInbound(platformId, threadId, message);
+  };
+}
+
 registerChannelAdapter('telegram', {
   factory: () => {
     const env = readEnvFile(['TELEGRAM_BOT_TOKEN']);
@@ -219,7 +239,11 @@ registerChannelAdapter('telegram', {
       async setup(hostConfig: ChannelSetup) {
         const intercepted: ChannelSetup = {
           ...hostConfig,
-          onInbound: createPairingInterceptor(botUsernamePromise, hostConfig.onInbound, token),
+          onInbound: createPairingInterceptor(
+            botUsernamePromise,
+            createReplyToBotMentionInterceptor(hostConfig.onInbound),
+            token,
+          ),
         };
         return withRetry(() => bridge.setup(intercepted), 'bridge.setup');
       },

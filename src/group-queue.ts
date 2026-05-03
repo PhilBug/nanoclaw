@@ -27,6 +27,12 @@ interface GroupState {
   retryCount: number;
 }
 
+export interface QueueStats {
+  activeCount: number;
+  waitingCount: number;
+  groupCount: number;
+}
+
 export class GroupQueue {
   private groups = new Map<string, GroupState>();
   private activeCount = 0;
@@ -53,6 +59,14 @@ export class GroupQueue {
       this.groups.set(groupJid, state);
     }
     return state;
+  }
+
+  getStats(): QueueStats {
+    return {
+      activeCount: this.activeCount,
+      waitingCount: this.waitingGroups.length,
+      groupCount: this.groups.size,
+    };
   }
 
   setProcessMessagesFn(fn: (groupJid: string) => Promise<boolean>): void {

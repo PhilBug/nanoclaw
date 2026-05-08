@@ -39,6 +39,8 @@ export interface ReplyContext {
   sender: string;
   /** True when the replied-to message was sent by the bot itself. */
   fromBot?: boolean;
+  /** Optional platform-specific sender handle for disambiguating bot replies. */
+  senderUsername?: string;
 }
 
 /** Extract reply context from a platform-specific raw message. Return null if no reply. */

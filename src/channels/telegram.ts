@@ -46,6 +46,7 @@ function extractReplyContext(raw: Record<string, any>): ReplyContext | null {
     text: reply.text || reply.caption || '',
     sender: reply.from?.first_name || reply.from?.username || 'Unknown',
     fromBot: reply.from?.is_bot === true,
+    senderUsername: reply.from?.username,
   };
 }
 
@@ -202,12 +203,14 @@ function createPairingInterceptor(
  * without @mentioning it — this makes that trigger the agent the same way.
  */
 function createReplyToBotMentionInterceptor(
+  botUsernamePromise: Promise<string | null>,
   hostOnInbound: ChannelSetup['onInbound'],
 ): ChannelSetup['onInbound'] {
   return async (platformId, threadId, message) => {
     if (!message.isMention && message.isGroup && message.kind === 'chat-sdk') {
       const content = message.content as Record<string, any> | null;
-      if (content?.replyTo?.fromBot) {
+      const botUsername = await botUsernamePromise;
+      if (botUsername && content?.replyTo?.fromBot && content?.replyTo?.senderUsername === botUsername) {
         message = { ...message, isMention: true };
       }
     }
@@ -241,7 +244,7 @@ registerChannelAdapter('telegram', {
           ...hostConfig,
           onInbound: createPairingInterceptor(
             botUsernamePromise,
-            createReplyToBotMentionInterceptor(hostConfig.onInbound),
+            createReplyToBotMentionInterceptor(botUsernamePromise, hostConfig.onInbound),
             token,
           ),
         };

@@ -12,6 +12,8 @@ import {
   CardText,
   Actions,
   Button,
+  LinkButton,
+  type CardChild,
   type Adapter,
   type ConcurrencyStrategy,
   type Message as ChatMessage,
@@ -49,6 +51,15 @@ export type ReplyContextExtractor = (raw: Record<string, any>) => ReplyContext |
 
 export interface ChatSdkBridgeConfig {
   adapter: Adapter;
+  /**
+   * Adapter-instance name for running multiple bridges of one platform
+   * (e.g. several Slack apps in one workspace). Defaults to the platform
+   * name. Drives the registry key, the webhook route (/webhook/<instance>),
+   * and the Chat SDK state namespace. channelType is NOT affected — user
+   * identity, formatting, and container config stay keyed on the platform.
+   * Must be URL-safe: non-empty, only letters, digits, '.', '_' or '-'.
+   */
+  instance?: string;
   concurrency?: ConcurrencyStrategy;
   /** Bot token for authenticating forwarded Gateway events (required for interaction handling). */
   botToken?: string;
@@ -123,6 +134,19 @@ export function splitForLimit(text: string, limit: number): string[] {
 
 export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter {
   const { adapter } = config;
+  // The instance name becomes a webhook route segment (the route regex is
+  // [^/?]+) and ':' is the state-namespace delimiter — reject anything that
+  // would break either, at construction time rather than at first webhook.
+  // Positive allow-list (not a deny-list): also rejects '' and
+  // whitespace-only names, which are config bugs — '' is falsy, so it
+  // would skip a truthiness guard, dead-end the webhook route, and
+  // collapse the state namespace into the default instance's keyspace.
+  if (config.instance !== undefined && !/^[A-Za-z0-9._-]+$/.test(config.instance)) {
+    throw new Error(
+      `chat-sdk bridge instance ${JSON.stringify(config.instance)} must be URL-safe: ` +
+        `non-empty, only letters, digits, '.', '_' or '-'`,
+    );
+  }
   const transformText = (t: string): string => (config.transformOutboundText ? config.transformOutboundText(t) : t);
   let chat: Chat;
   let state: SqliteStateAdapter;
@@ -195,14 +219,21 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
   }
 
   const bridge: ChannelAdapter = {
-    name: adapter.name,
-    channelType: adapter.name,
+    name: config.instance ?? adapter.name,
+    channelType: adapter.name, // unchanged — semantic platform key
+    instance: config.instance, // undefined ⇒ default instance
+
     supportsThreads: config.supportsThreads,
 
     async setup(hostConfig: ChannelSetup) {
       setupConfig = hostConfig;
 
-      state = new SqliteStateAdapter();
+      // State namespace: ONLY for a named non-default instance. A skill
+      // that explicitly names the primary instance after the platform
+      // (instance === adapter.name) still lands on the legacy UNPREFIXED
+      // keyspace — prefixing the default would orphan every live install's
+      // chat_sdk_subscriptions/kv/locks/lists rows.
+      state = new SqliteStateAdapter(config.instance && config.instance !== adapter.name ? config.instance : undefined);
 
       chat = new Chat({
         adapters: { [adapter.name]: adapter },
@@ -257,12 +288,12 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
       // Chat SDK dispatch (handling-events.mdx §"Handler dispatch order") is
       // exclusive: subscribed → onSubscribedMessage; unsubscribed+mention →
       // onNewMention; unsubscribed+pattern-match → onNewMessage. Registering
-      // with `/./` lets the router see every plain message on every
-      // unsubscribed thread the bot can see. The router short-circuits via
+      // with `/[\s\S]*/` lets the router see every plain message (including
+      // media-only messages with empty text) on every unsubscribed thread the
       // getMessagingGroupWithAgentCount (~1 DB read) for unwired channels,
       // so forwarding every one is cheap enough to not need a bridge-side
       // flood gate.
-      chat.onNewMessage(/./, async (thread, message) => {
+      chat.onNewMessage(/[\s\S]*/, async (thread, message) => {
         const channelId = adapter.channelIdFromThreadId(thread.id);
         await setupConfig.onInbound(channelId, thread.id, await messageToInbound(message, false, true));
       });
@@ -286,11 +317,13 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
         const matched = render?.options.find((o) => o.value === selectedOption);
         const selectedLabel = matched?.selectedLabel ?? selectedOption ?? '(clicked)';
 
-        // Update the card to show the selected answer and remove buttons
+        // Update the card to show the selected answer, who acted, and remove buttons
+        const actorName = event.user?.userName || event.user?.fullName || '';
+        const byLine = actorName ? ` — ${actorName}` : '';
         try {
           const tid = event.threadId;
           await adapter.editMessage(tid, event.messageId, {
-            markdown: `${title}\n\n${selectedLabel}`,
+            markdown: `${title}\n\n${selectedLabel}${byLine}`,
           });
         } catch (err) {
           log.warn('Failed to update card after action', { err });
@@ -309,8 +342,14 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
         // Start local HTTP server to receive forwarded Gateway events (including interactions)
         const webhookUrl = await startLocalWebhookServer(gatewayAdapter, setupConfig, config.botToken);
 
+        // Exponential backoff capped at 1h. Without this, an unrecoverable
+        // failure (e.g., TokenInvalid) restarts ~10×/sec and Discord's
+        // Cloudflare layer issues a multi-hour IP block. A run that lasts
+        // longer than 5 minutes counts as healthy and resets the counter.
+        let consecutiveFailures = 0;
         const startGateway = () => {
           if (gatewayAbort?.signal.aborted) return;
+          const startedAt = Date.now();
           // Capture the long-running listener promise via waitUntil
           let listenerPromise: Promise<unknown> | undefined;
           gatewayAdapter.startGatewayListener!(
@@ -325,28 +364,41 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
           ).then(() => {
             // startGatewayListener resolves immediately with a Response;
             // the actual work is in the listenerPromise passed to waitUntil
-            if (listenerPromise) {
-              listenerPromise
-                .then(() => {
-                  if (!gatewayAbort?.signal.aborted) {
-                    log.info('Gateway listener expired, restarting', { adapter: adapter.name });
-                    startGateway();
-                  }
-                })
-                .catch((err) => {
-                  if (!gatewayAbort?.signal.aborted) {
-                    log.error('Gateway listener error, restarting in 5s', { adapter: adapter.name, err });
-                    setTimeout(startGateway, 5000);
-                  }
+            if (!listenerPromise) return;
+            const reschedule = (err?: unknown) => {
+              if (gatewayAbort?.signal.aborted) return;
+              const ranForMs = Date.now() - startedAt;
+              if (ranForMs > 5 * 60 * 1000) consecutiveFailures = 0;
+              else consecutiveFailures++;
+              const delayMs = Math.min(60 * 60 * 1000, 2 ** consecutiveFailures * 1000);
+              if (err) {
+                log.error('Gateway listener error, retrying', {
+                  adapter: adapter.name,
+                  err,
+                  consecutiveFailures,
+                  delayMs,
                 });
-            }
+              } else {
+                log.info('Gateway listener expired, restarting', {
+                  adapter: adapter.name,
+                  consecutiveFailures,
+                  delayMs,
+                });
+              }
+              setTimeout(startGateway, delayMs);
+            };
+            listenerPromise.then(() => reschedule()).catch(reschedule);
           });
         };
         startGateway();
         log.info('Gateway listener started', { adapter: adapter.name });
       } else {
-        // Non-gateway adapters (Slack, Teams, GitHub, etc.) — register on the shared webhook server
-        registerWebhookAdapter(chat, adapter.name);
+        // Non-gateway adapters (Slack, Teams, GitHub, etc.) — register on the
+        // shared webhook server. The handler key stays adapter.name (the
+        // Chat instance's webhooks map is keyed by it); the route segment is
+        // the instance, so each same-platform bridge gets its own URL (and
+        // its own signing secret — platforms sign per-app).
+        registerWebhookAdapter(chat, adapter.name, config.instance ?? adapter.name);
       }
 
       log.info('Chat SDK bridge initialized', { adapter: adapter.name });
@@ -400,6 +452,59 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
           card,
           fallbackText: `${title}\n\n${question}\nOptions: ${options.map((o) => o.label).join(', ')}`,
         });
+        return result?.id;
+      }
+
+      // Display card (send_card MCP tool) — returns immediately, no callback flow.
+      // Non-URL actions are dropped: send_card's contract is fire-and-forget, so a
+      // callback button would have nowhere to land. URL actions render as link buttons.
+      if (content.type === 'card' && content.card && typeof content.card === 'object') {
+        const cardSpec = content.card as Record<string, unknown>;
+        const title = (cardSpec.title as string) || '';
+        const fallbackText = (content.fallbackText as string) || (cardSpec.description as string) || title || '';
+
+        const cardChildren: CardChild[] = [];
+        if (typeof cardSpec.description === 'string' && cardSpec.description) {
+          cardChildren.push(CardText(cardSpec.description));
+        }
+        if (Array.isArray(cardSpec.children)) {
+          for (const child of cardSpec.children) {
+            if (typeof child === 'string' && child) {
+              cardChildren.push(CardText(child));
+            } else if (
+              child &&
+              typeof child === 'object' &&
+              typeof (child as Record<string, unknown>).text === 'string'
+            ) {
+              cardChildren.push(CardText((child as Record<string, string>).text));
+            }
+          }
+        }
+        if (Array.isArray(cardSpec.actions)) {
+          const linkButtons = (cardSpec.actions as Array<Record<string, unknown>>)
+            .filter((a) => typeof a.url === 'string' && a.url && typeof a.label === 'string' && a.label)
+            .map((a) => {
+              const style = a.style;
+              const safeStyle: 'primary' | 'danger' | 'default' | undefined =
+                style === 'primary' || style === 'danger' || style === 'default' ? style : undefined;
+              return LinkButton({
+                label: a.label as string,
+                url: a.url as string,
+                style: safeStyle,
+              });
+            });
+          if (linkButtons.length > 0) {
+            cardChildren.push(Actions(linkButtons));
+          }
+        }
+
+        if (cardChildren.length === 0 && !title) {
+          log.warn('send_card payload empty, skipping delivery');
+          return;
+        }
+
+        const card = Card({ title, children: cardChildren });
+        const result = await adapter.postMessage(tid, { card, fallbackText });
         return result?.id;
       }
 

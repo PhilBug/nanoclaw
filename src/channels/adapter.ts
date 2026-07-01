@@ -44,6 +44,9 @@ export interface DeliveryAddress {
  */
 export interface InboundEvent {
   channelType: string;
+  /** Receiving adapter instance; stamped host-side (src/index.ts onInbound).
+   *  Absent (e.g. CLI onInboundEvent) means the default instance (= channelType). */
+  instance?: string;
   platformId: string;
   threadId: string | null;
   message: {
@@ -113,6 +116,15 @@ export interface ChannelAdapter {
   channelType: string;
 
   /**
+   * Adapter-instance name — distinguishes N adapters of one platform
+   * (e.g. three Slack apps in one workspace). Defaults to channelType.
+   * channelType stays the SEMANTIC platform key (user ids '<channelType>:<handle>',
+   * formatting, container config); instance is a host-side routing key only.
+   * Must be unique across active adapters and URL-safe (no '/', '?', ':').
+   */
+  instance?: string;
+
+  /**
    * Whether this adapter models conversations as threads.
    *
    * true  — adapter's platform uses threads as the primary conversation unit
@@ -135,6 +147,7 @@ export interface ChannelAdapter {
   // Optional
   setTyping?(platformId: string, threadId: string | null): Promise<void>;
   syncConversations?(): Promise<ConversationInfo[]>;
+  resolveChannelName?(platformId: string): Promise<string | null>;
 
   /**
    * Subscribe the bot to a thread so follow-up messages route via the
